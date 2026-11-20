@@ -1,0 +1,13 @@
+[features]
+skip-lint = false
+
+[programs.devnet]
+originchain_registry = "EbePt3vR4pp9WRuY6hAfhchTfAPs1nNVsJYyurXajUPB"
+
+[provider]
+cluster = "devnet"
+wallet = "~/.config/solana/originchain-devnet.json"
+
+[workspace]
+members = ["programs/originchain_registry"]
+

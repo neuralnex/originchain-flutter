@@ -4,6 +4,9 @@
 .dart_tool/
 .packages
 build/
+android/.kotlin/
+target/
+backend/.venv/
 # Keep pubspec.lock checked in for this application so dependency resolution is reproducible.
 
 # Directory created by dartdoc
@@ -13,7 +16,6 @@ doc/api/
 # dotenv environment variables file
 .env*
 !.env.example
-backend/.venv/
 __pycache__/
 *.py[cod]
 

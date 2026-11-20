@@ -6,7 +6,10 @@ class NeonShareService {
   NeonShareService._();
 
   static final instance = NeonShareService._();
-  static const _baseUrl = String.fromEnvironment('ORIGINCHAIN_API_URL');
+  static const _baseUrl = String.fromEnvironment(
+    'ORIGINCHAIN_API_URL',
+    defaultValue: 'https://originchain-flutter.onrender.com',
+  );
   final Dio _dio = Dio();
 
   Future<void> uploadFile({

@@ -2,7 +2,7 @@ import os
 import re
 import uuid
 import hashlib
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import quote
 
 import boto3
@@ -12,6 +12,8 @@ from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from firebase_admin import auth, firestore
 from pydantic import BaseModel, Field
+
+from . import solana_sponsor
 
 
 BUCKET = os.environ.get("NEON_BUCKET", "")
@@ -71,9 +73,84 @@ class UploadRequest(BaseModel):
     contentType: str = Field(min_length=1, max_length=255)
 
 
+class SponsoredTransactionRequest(BaseModel):
+    operation: Literal["register_asset", "append_version"]
+    publisher: str = Field(min_length=32, max_length=44)
+    assetId: str = Field(pattern=r"^[0-9a-f]{64}$")
+    versionId: str = Field(pattern=r"^[0-9a-f]{64}$")
+    contentHash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    manifestHash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    parentVersionId: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+
+
+class SponsoredSubmissionRequest(SponsoredTransactionRequest):
+    transactionBase64: str = Field(min_length=1, max_length=20000)
+
+
+class PublicSolanaVerificationRequest(SponsoredTransactionRequest):
+    transactionSignature: str = Field(min_length=80, max_length=100)
+
+
+def _sponsored_args(body: SponsoredTransactionRequest):
+    if body.operation == "append_version" and not body.parentVersionId:
+        raise HTTPException(status_code=422, detail="parentVersionId is required for a new version.")
+    return {
+        "publisher": body.publisher,
+        "assetId": body.assetId,
+        "versionId": body.versionId,
+        "contentHash": body.contentHash,
+        "manifestHash": body.manifestHash,
+        "parentVersionId": body.parentVersionId,
+    }
+
+
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    try:
+        solana_sponsor._fee_payer()
+        sponsor_ready = True
+    except HTTPException:
+        sponsor_ready = False
+    return {
+        "status": "ok",
+        "solana": {
+            "cluster": "devnet" if "devnet" in solana_sponsor.RPC_URL else "custom",
+            "programId": str(solana_sponsor.PROGRAM_ID),
+            "sponsorshipConfigured": sponsor_ready,
+        },
+    }
+
+
+@app.post("/v1/solana/transactions")
+def create_sponsored_transaction(body: SponsoredTransactionRequest, user=Depends(require_user)):
+    solana_sponsor.reserve_sponsor_attempt(
+        user["uid"],
+        int(os.environ.get("SOLANA_USER_DAILY_LIMIT", "10")),
+        int(os.environ.get("SOLANA_GLOBAL_DAILY_LIMIT", "100")),
+    )
+    encoded, signer_index = solana_sponsor.create_transaction(
+        body.operation, _sponsored_args(body)
+    )
+    return {
+        "transactionBase64": encoded,
+        "feePayer": str(solana_sponsor._fee_payer().pubkey()),
+        "publisherSignerIndex": signer_index,
+    }
+
+
+@app.post("/v1/solana/transactions/submit")
+def submit_sponsored_transaction(body: SponsoredSubmissionRequest, user=Depends(require_user)):
+    signature = solana_sponsor.submit_transaction(
+        body.operation, _sponsored_args(body), body.transactionBase64
+    )
+    return {"signature": signature, "cluster": "devnet"}
+
+
+@app.post("/v1/solana/verify")
+def verify_public_solana_record(body: PublicSolanaVerificationRequest):
+    return solana_sponsor.verify_transaction(
+        body.transactionSignature, body.operation, _sponsored_args(body)
+    )
 
 
 @app.post("/v1/shares/{record_id}/upload-url")

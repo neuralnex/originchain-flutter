@@ -11,7 +11,10 @@ class FirestoreShareService {
   final _firestore = FirebaseFirestore.instance;
   final _auth = FirebaseAuth.instance;
 
-  Future<String> publish(OriginManifest manifest) async {
+  Future<String> publish(
+    OriginManifest manifest, {
+    required String solanaSignature,
+  }) async {
     var user = _auth.currentUser;
     user ??= (await _auth.signInAnonymously()).user;
     if (user == null) throw StateError('Could not create a publisher session.');
@@ -21,7 +24,16 @@ class FirestoreShareService {
       'schema': 'originchain.share.v1',
       'ownerUid': user.uid,
       'createdAt': Timestamp.fromDate(manifest.createdAt),
-      'manifest': manifest.toJson(),
+      'manifest': {
+        ...manifest.toJson(),
+        // Receipt is envelope metadata; OriginManifest.toJson excludes it so
+        // the signed manifest bytes remain identical to the on-chain hash.
+        'solana': {
+          'cluster': 'devnet',
+          'programId': 'EbePt3vR4pp9WRuY6hAfhchTfAPs1nNVsJYyurXajUPB',
+          'transactionSignature': solanaSignature,
+        },
+      },
       'fileStorage': null,
     });
     return record.id;
@@ -54,5 +66,15 @@ class FirestoreShareService {
     return value is Map<String, dynamic> && value['provider'] == 'neon'
         ? value
         : null;
+  }
+
+  Future<Map<String, dynamic>?> readSolanaReceipt(String recordId) async {
+    if (!RegExp(r'^[A-Za-z0-9_-]{10,40}$').hasMatch(recordId)) return null;
+    final snapshot = await _firestore
+        .collection('sharedRecords')
+        .doc(recordId)
+        .get();
+    final value = (snapshot.data()?['manifest'] as Map?)?['solana'];
+    return value is Map<String, dynamic> ? value : null;
   }
 }

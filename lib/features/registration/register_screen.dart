@@ -6,7 +6,9 @@ import 'package:share_plus/share_plus.dart';
 import '../../data/local/fingerprint_entry.dart';
 import '../../services/sharing/firestore_share_service.dart';
 import '../../services/sharing/neon_share_service.dart';
+import '../../services/sharing/origin_manifest.dart';
 import '../../services/sharing/publisher_identity_service.dart';
+import '../../services/solana/origin_solana_service.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({required this.onFingerprintReady, super.key});
@@ -24,6 +26,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
   PlatformFile? _selectedFile;
   String? _shareUrl;
   String? _pendingRecordId;
+  OriginManifest? _pendingManifest;
+  String? _pendingChainSignature;
   bool _isPublishing = false;
 
   Future<void> _chooseFile() async {
@@ -33,6 +37,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
       _fingerprint = null;
       _selectedFile = null;
       _pendingRecordId = null;
+      _pendingManifest = null;
+      _pendingChainSignature = null;
     });
     try {
       final files = await FilePicker.pickFiles();
@@ -80,12 +86,17 @@ class _RegisterScreenState extends State<RegisterScreen> {
       _error = null;
     });
     try {
+      final manifest = _pendingManifest ??= await PublisherIdentityService
+          .instance
+          .createManifest(fingerprint);
+      _pendingChainSignature ??= await OriginSolanaService.instance
+          .commitManifest(manifest);
       var recordId = _pendingRecordId;
       if (recordId == null) {
-        final manifest = await PublisherIdentityService.instance.createManifest(
-          fingerprint,
+        recordId = await FirestoreShareService.instance.publish(
+          manifest,
+          solanaSignature: _pendingChainSignature!,
         );
-        recordId = await FirestoreShareService.instance.publish(manifest);
         _pendingRecordId = recordId;
       }
       final file = _selectedFile;
@@ -98,6 +109,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
         sha256: fingerprint.sha256,
       );
       _pendingRecordId = null;
+      _pendingManifest = null;
+      _pendingChainSignature = null;
       final link = Uri.https('gen-lang-client-0915748775.web.app', '/', {
         'record': recordId,
       });
@@ -162,7 +175,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       ),
                       const SizedBox(height: 8),
                       Text(
-                        'The file is fingerprinted locally first. Upload happens only when you tap Upload file & share.',
+                        'The file is fingerprinted locally first. Registration and file upload happen only after you confirm below.',
                         style: theme.textTheme.bodyMedium?.copyWith(
                           color: theme.colorScheme.onSurfaceVariant,
                         ),
@@ -309,7 +322,7 @@ class _FingerprintCard extends StatelessWidget {
             ),
             const SizedBox(height: 10),
             Text(
-              'This uploads the original file to private Neon Object Storage. The public Firestore record includes its name, size, fingerprint, and device-key signature. Anyone with the share link can download the file. This record is not on Solana yet.',
+              'Registering anchors the signed fingerprint on Solana devnet. Sharing uploads the original file to private Neon Object Storage. Anyone with the share link can download it; users do not pay Solana fees.',
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
               ),
@@ -327,8 +340,8 @@ class _FingerprintCard extends StatelessWidget {
                     : const Icon(Icons.share_rounded),
                 label: Text(
                   isPublishing
-                      ? 'Uploading & publishing…'
-                      : 'Upload file & share',
+                      ? 'Registering & sharing…'
+                      : 'Register on Solana & share',
                 ),
               ),
             ),

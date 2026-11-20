@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:crypto/crypto.dart' as crypto;
 import 'package:cryptography/cryptography.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:solana/base58.dart';
 
 import '../../data/local/fingerprint_entry.dart';
 import 'origin_manifest.dart';
@@ -86,6 +87,19 @@ class PublisherIdentityService {
     } catch (_) {
       return false;
     }
+  }
+
+  Future<String> get solanaAddress async {
+    final publicKey = await (await _loadOrCreateKeyPair()).extractPublicKey();
+    return base58encode(publicKey.bytes);
+  }
+
+  Future<List<int>> signSolanaMessage(List<int> message) async {
+    final signature = await _algorithm.sign(
+      message,
+      keyPair: await _loadOrCreateKeyPair(),
+    );
+    return signature.bytes;
   }
 
   Future<SimpleKeyPair> _loadOrCreateKeyPair() async {

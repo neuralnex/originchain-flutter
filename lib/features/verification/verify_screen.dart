@@ -7,6 +7,7 @@ import '../../services/sharing/firestore_share_service.dart';
 import '../../services/sharing/origin_manifest.dart';
 import '../../services/sharing/publisher_identity_service.dart';
 import '../../services/sharing/neon_share_service.dart';
+import '../../services/solana/origin_solana_service.dart';
 
 class VerifyScreen extends StatefulWidget {
   const VerifyScreen({this.recordId, super.key});
@@ -27,6 +28,7 @@ class _VerifyScreenState extends State<VerifyScreen> {
   bool _openingDownload = false;
   bool _hasSharedFile = false;
   String? _loadedRecordId;
+  String? _solanaStatus;
 
   @override
   void initState() {
@@ -54,6 +56,7 @@ class _VerifyScreenState extends State<VerifyScreen> {
       _recordError = null;
       _fileResult = null;
       _manifest = null;
+      _solanaStatus = null;
     });
     try {
       final manifest = await FirestoreShareService.instance.readPublicRecord(
@@ -66,11 +69,33 @@ class _VerifyScreenState extends State<VerifyScreen> {
       final fileObject = await FirestoreShareService.instance.readFileObject(
         recordId,
       );
+      final receipt = await FirestoreShareService.instance.readSolanaReceipt(
+        recordId,
+      );
+      var solanaStatus = 'No Solana transaction is attached to this record.';
+      if (receipt != null &&
+          receipt['cluster'] == 'devnet' &&
+          receipt['programId'] == OriginSolanaService.programId &&
+          receipt['transactionSignature'] is String) {
+        try {
+          final result = await OriginSolanaService.instance
+              .verifyManifestReceipt(
+                manifest,
+                receipt['transactionSignature'] as String,
+              );
+          solanaStatus = result['verified'] == true
+              ? 'Verified on Solana devnet · slot ${result['slot']}'
+              : 'Solana transaction does not match this manifest.';
+        } catch (_) {
+          solanaStatus = 'Could not check the Solana transaction right now.';
+        }
+      }
       if (mounted) {
         setState(() {
           _manifest = manifest;
           _hasSharedFile = fileObject != null;
           _loadedRecordId = recordId;
+          _solanaStatus = solanaStatus;
         });
       }
     } catch (error) {
@@ -195,6 +220,8 @@ class _VerifyScreenState extends State<VerifyScreen> {
                         const SizedBox(height: 5),
                         Text('Signed device identity · signature valid'),
                         const SizedBox(height: 5),
+                        Text(_solanaStatus ?? 'Checking Solana registration…'),
+                        const SizedBox(height: 8),
                         SelectableText(
                           'SHA-256  ${manifest.sha256}',
                           style: theme.textTheme.bodySmall?.copyWith(
@@ -253,7 +280,7 @@ class _VerifyScreenState extends State<VerifyScreen> {
                         ],
                         const SizedBox(height: 8),
                         Text(
-                          'This is a signed share record. It has not been committed to Solana, and the signing key is not yet linked to a verified person or wallet.',
+                          'The Solana result above checks whether this manifest is committed on devnet. The publisher key is self-issued and is not linked to a verified person or wallet.',
                           style: theme.textTheme.bodySmall?.copyWith(
                             color: theme.colorScheme.onSurfaceVariant,
                           ),
