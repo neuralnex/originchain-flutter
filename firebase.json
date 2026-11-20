@@ -37,7 +37,7 @@
       }
     ],
     "predeploy": [
-      "flutter build web --release --no-tree-shake-icons --no-wasm-dry-run"
+      "flutter build web --release --no-tree-shake-icons --no-wasm-dry-run --dart-define=ORIGINCHAIN_API_URL=https://originchain-flutter.onrender.com"
     ]
   }
 }

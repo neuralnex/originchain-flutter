@@ -18,7 +18,7 @@ Open this repository in VS Code and use the Flutter and Dart extensions.
 flutter pub get
 flutter run -d chrome       # Web
 flutter run                 # Android or iOS device
-flutter build web --release
+flutter build web --release --dart-define=ORIGINCHAIN_API_URL=https://originchain-flutter.onrender.com
 ```
 
 Local fingerprints and preferences use SQLite on Android and iOS. Web uses SQLite compiled to WebAssembly in a browser worker via `sqflite_common_ffi_web`. That web companion is currently documented as experimental. If its version changes, rerun `dart run sqflite_common_ffi_web:setup` to refresh `web/sqlite3.wasm` and `web/sqflite_sw.js`.
@@ -31,7 +31,6 @@ Hosting serves the Flutter web release from `build/web`, uses an SPA rewrite for
 
 ```sh
 firebase login
-flutter build web --release --no-tree-shake-icons --no-wasm-dry-run
 firebase deploy --only hosting
 ```
 
@@ -61,6 +60,10 @@ uvicorn app.main:app --reload --port 8080
 ```
 
 Set `ORIGINCHAIN_API_URL` to the API origin when running Flutter, for example `flutter run -d chrome --dart-define=ORIGINCHAIN_API_URL=http://localhost:8080`. For web, include the Hosting origin in `CORS_ORIGINS`. Deploy the `backend/` Dockerfile to Cloud Run with unauthenticated HTTP enabled (the API verifies Firebase ID tokens itself), a runtime service account with Firestore access, and the Neon values supplied as Secret Manager environment variables. The API currently limits uploads to 100 MiB by default; tune `MAX_FILE_BYTES` to your needs.
+
+### Deploy the API on Render
+
+Create or configure the Render web service with `backend/` as its root directory and the included Dockerfile. Set the health check path to `/health`. Add `AWS_ENDPOINT_URL_S3`, `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `NEON_BUCKET`, `CORS_ORIGINS`, `MAX_FILE_BYTES`, and `SIGNED_URL_TTL_SECONDS` as Render environment variables. Set `CORS_ORIGINS` to the Firebase Hosting origin. Firebase Admin also needs credentials on Render; add a Firebase service-account JSON as a Render secret file and set `GOOGLE_APPLICATION_CREDENTIALS` to its mounted path. Never place that JSON or Neon credentials in the repo. The provided Render service URL is configured into Firebase's Hosting build.
 
 ## Current foundation
 
