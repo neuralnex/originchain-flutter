@@ -280,7 +280,7 @@ class _EmptyFolders extends StatelessWidget {
   Widget build(BuildContext context) => Card(
     child: ListTile(
       leading: const Icon(Icons.create_new_folder_outlined),
-      title: const Text('Make a folder for your work'),
+      title: const Text('No folders yet'),
       trailing: const Icon(Icons.arrow_forward_rounded),
       onTap: onOpenLibrary,
     ),
@@ -326,7 +326,7 @@ class _EmptyWork extends StatelessWidget {
       child: Row(children: [
         Icon(received ? Icons.inbox_outlined : Icons.share_outlined, color: Theme.of(context).colorScheme.primary),
         const SizedBox(width: 12),
-        Expanded(child: Text(received ? 'Files you save from a share link appear here.' : 'Share a registered file to see it here.')),
+        Expanded(child: Text(received ? 'Nothing received yet' : 'Nothing shared yet')),
         IconButton(
           tooltip: received ? 'Open verification' : 'Register a file',
           onPressed: received ? onVerify : onRegister,

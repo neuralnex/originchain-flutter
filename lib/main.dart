@@ -186,7 +186,7 @@ class _OriginShellState extends State<OriginShell> {
       if (!mounted) return;
       setState(() => _walletAddress = address);
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Wallet connected. You sign; OriginChain pays network fees.')),
+        const SnackBar(content: Text('Wallet connected.')),
       );
     } on WalletConnectionCancelled {
       // A wallet cancellation is an expected user choice.
@@ -287,7 +287,6 @@ class _OriginShellState extends State<OriginShell> {
         onThemeModeChanged: widget.onThemeModeChanged,
         walletAddress: _walletAddress,
         walletBusy: _walletBusy,
-        supportsWallet: OriginSolanaService.instance.supportsMobileWalletAdapter,
         onConnectWallet: _connectWallet,
         onDisconnectWallet: _disconnectWallet,
       ),
@@ -425,7 +424,7 @@ class _OriginShellState extends State<OriginShell> {
           : !supports
           ? () => ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(
-                content: Text('Wallet signing is available through Android Mobile Wallet Adapter. This platform uses your device signing key.'),
+                content: Text('Wallet connection is unavailable on this platform.'),
               ),
             )
           : address == null
@@ -505,19 +504,6 @@ class _DesktopNavigation extends StatelessWidget {
             if (index < destinations.length - 1) const SizedBox(height: 6),
           ],
           const Spacer(),
-          Container(
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: theme.colorScheme.primaryContainer.withValues(alpha: 0.62),
-              borderRadius: BorderRadius.circular(18),
-            ),
-            child: Text(
-              'OriginChain covers Solana network fees.',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.colorScheme.onPrimaryContainer,
-              ),
-            ),
-          ),
         ],
       ),
     );

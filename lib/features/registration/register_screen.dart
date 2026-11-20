@@ -180,7 +180,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Upload a shareable copy?'),
-        content: Text('${fingerprint.fileName} will be uploaded to private OriginChain storage. Anyone with its share link can download it. The registered fingerprint stays on Solana either way.'),
+        content: const Text('Anyone with the share link can download this copy.'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
           FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Upload copy')),
@@ -216,73 +216,31 @@ class _RegisterScreenState extends State<RegisterScreen> {
           sliver: SliverList.list(
             children: [
               Text('Register', style: theme.textTheme.headlineMedium),
-              const SizedBox(height: 8),
-              Text(
-                'Prove this exact version exists. Your file stays on this device.',
-                style: theme.textTheme.bodyLarge?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
-              ),
-              const SizedBox(height: 20),
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(20),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Icon(
-                            Icons.lock_outline_rounded,
-                            color: theme.colorScheme.primary,
-                          ),
-                          const SizedBox(width: 10),
-                          Text(
-                            'Private by default',
-                            style: theme.textTheme.titleMedium,
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        'We fingerprint it here. Only its signed fingerprint goes on Solana.',
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: theme.colorScheme.onSurfaceVariant,
-                        ),
-                      ),
-                      const SizedBox(height: 18),
-                      SizedBox(
-                        width: double.infinity,
-                        child: FilledButton.icon(
-                          onPressed: _isHashing ? null : _chooseFile,
-                          icon: _isHashing
-                              ? const SizedBox.square(
-                                  dimension: 18,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                  ),
-                                )
-                              : const Icon(Icons.upload_file_rounded),
-                          label: Text(
-                            _isHashing
-                                ? 'Fingerprinting file…'
-                                : 'Choose a file',
-                          ),
-                        ),
-                      ),
-                      if (_error != null) ...[
-                        const SizedBox(height: 12),
-                        Text(
-                          _error!,
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            color: theme.colorScheme.error,
-                          ),
-                        ),
-                      ],
-                    ],
+              const SizedBox(height: 18),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: _isHashing ? null : _chooseFile,
+                  icon: _isHashing
+                      ? const SizedBox.square(
+                          dimension: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.upload_file_rounded),
+                  label: Text(
+                    _isHashing ? 'Fingerprinting file…' : 'Choose a file',
                   ),
                 ),
               ),
+              if (_error != null) ...[
+                const SizedBox(height: 12),
+                Text(
+                  _error!,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: theme.colorScheme.error,
+                  ),
+                ),
+              ],
               if (_fingerprint case final fingerprint?) ...[
                 const SizedBox(height: 18),
                 _FingerprintCard(
@@ -390,8 +348,6 @@ class _FingerprintCard extends StatelessWidget {
             ),
             const SizedBox(height: 10),
             if (isRegistered) ...[
-              Text('Your original file was not uploaded.', style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
-              const SizedBox(height: 12),
               SizedBox(
                 width: double.infinity,
                 child: FilledButton.icon(

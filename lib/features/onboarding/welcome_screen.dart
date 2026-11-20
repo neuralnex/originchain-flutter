@@ -45,7 +45,7 @@ class WelcomeScreen extends StatelessWidget {
                         ),
                       ],
                     ),
-                    const SizedBox(height: 40),
+                    const SizedBox(height: 48),
                     Container(
                       width: double.infinity,
                       height: 235,
@@ -106,30 +106,7 @@ class WelcomeScreen extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 30),
-                    Text(
-                      'Give your work\na clear origin.',
-                      style: theme.textTheme.headlineLarge,
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      'Create a record of your digital assets and make their history easier to verify.',
-                      style: theme.textTheme.bodyLarge?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                    const SizedBox(height: 24),
-                    _WelcomePoint(
-                      icon: Icons.lock_outline_rounded,
-                      title: 'Your files stay private',
-                      detail: 'Fingerprints are created on your device.',
-                    ),
-                    const SizedBox(height: 12),
-                    _WelcomePoint(
-                      icon: Icons.payments_outlined,
-                      title: 'No SOL needed',
-                      detail:
-                          'OriginChain covers network and transaction fees.',
-                    ),
+                    Text('Register. Share. Verify.', style: theme.textTheme.headlineLarge),
                     const Spacer(),
                     const SizedBox(height: 26),
                     SizedBox(
@@ -139,16 +116,6 @@ class WelcomeScreen extends StatelessWidget {
                         child: const Text('Continue as a guest'),
                       ),
                     ),
-                    const SizedBox(height: 10),
-                    Center(
-                      child: Text(
-                        'You can verify shared records without an account.',
-                        textAlign: TextAlign.center,
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: theme.colorScheme.onSurfaceVariant,
-                        ),
-                      ),
-                    ),
                   ],
                 ),
               ),
@@ -156,52 +123,6 @@ class WelcomeScreen extends StatelessWidget {
           ),
         ),
       ),
-    );
-  }
-}
-
-class _WelcomePoint extends StatelessWidget {
-  const _WelcomePoint({
-    required this.icon,
-    required this.title,
-    required this.detail,
-  });
-
-  final IconData icon;
-  final String title;
-  final String detail;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Row(
-      children: [
-        Container(
-          width: 42,
-          height: 42,
-          decoration: BoxDecoration(
-            color: theme.colorScheme.surface,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: theme.colorScheme.outlineVariant),
-          ),
-          child: Icon(icon, size: 20, color: theme.colorScheme.primary),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(title, style: theme.textTheme.titleSmall),
-              Text(
-                detail,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
     );
   }
 }

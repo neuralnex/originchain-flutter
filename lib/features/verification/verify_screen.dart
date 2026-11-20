@@ -223,13 +223,6 @@ class _VerifyScreenState extends State<VerifyScreen> {
           sliver: SliverList.list(
             children: [
               Text('Verify', style: theme.textTheme.headlineMedium),
-              const SizedBox(height: 8),
-              Text(
-                'See what this file matches and what changed.',
-                style: theme.textTheme.bodyLarge?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
-              ),
               const SizedBox(height: 24),
               Card(
                 child: Padding(
@@ -427,7 +420,7 @@ class _ProvenanceStory extends StatelessWidget {
               ]),
             ],
             Text(
-              'This history shows registered versions. Unregistered edits may not appear here.',
+              'Only registered versions appear here.',
               style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
             ),
           ],

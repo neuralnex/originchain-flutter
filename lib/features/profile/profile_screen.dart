@@ -9,7 +9,6 @@ class ProfileScreen extends StatelessWidget {
     required this.onThemeModeChanged,
     required this.walletAddress,
     required this.walletBusy,
-    required this.supportsWallet,
     required this.onConnectWallet,
     required this.onDisconnectWallet,
     super.key,
@@ -19,7 +18,6 @@ class ProfileScreen extends StatelessWidget {
   final ValueChanged<ThemeMode> onThemeModeChanged;
   final String? walletAddress;
   final bool walletBusy;
-  final bool supportsWallet;
   final VoidCallback onConnectWallet;
   final VoidCallback onDisconnectWallet;
 
@@ -109,14 +107,13 @@ class ProfileScreen extends StatelessWidget {
                         ],
                       ),
                       const SizedBox(height: 8),
-                      Text(
-                        walletAddress == null
-                            ? 'Sign provenance with your wallet. OriginChain covers the Solana fee.'
-                            : '${_shortAddress(walletAddress!)} · Devnet',
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: theme.colorScheme.onSurfaceVariant,
+                      if (walletAddress != null)
+                        Text(
+                          '${_shortAddress(walletAddress!)} · Devnet',
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
                         ),
-                      ),
                       const SizedBox(height: 14),
                       SizedBox(
                         width: double.infinity,
@@ -141,16 +138,6 @@ class ProfileScreen extends StatelessWidget {
                           ),
                         ),
                       ),
-                      if (!supportsWallet && walletAddress == null)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 8),
-                          child: Text(
-                            'Android wallet signing is supported now. Other platforms use your secure device signing key.',
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: theme.colorScheme.onSurfaceVariant,
-                            ),
-                          ),
-                        ),
                     ],
                   ),
                 ),
@@ -167,22 +154,6 @@ class ProfileScreen extends StatelessWidget {
                 ],
                 selected: {themeMode},
                 onSelectionChanged: (selected) => onThemeModeChanged(selected.first),
-              ),
-              const SizedBox(height: 24),
-              Card(
-                child: Column(
-                  children: const [
-                    ListTile(
-                      leading: Icon(Icons.lock_outline_rounded),
-                      title: Text('Files stay on your device until you share them'),
-                    ),
-                    Divider(height: 1),
-                    ListTile(
-                      leading: Icon(Icons.payments_outlined),
-                      title: Text('OriginChain pays Solana fees'),
-                    ),
-                  ],
-                ),
               ),
             ],
           ),
@@ -367,7 +338,7 @@ class _AccountDialogState extends State<_AccountDialog> {
       await OriginAuthService.instance.signInWithGoogle();
       if (mounted) Navigator.pop(context);
     } on FirebaseAuthException catch (error) {
-      if (mounted) setState(() => _error = _authMessage(error.code));
+      if (mounted) setState(() => _error = _authMessage(error.code, google: true));
     } catch (_) {
       if (mounted) setState(() => _error = 'Google sign-in did not complete. Check Google provider setup and try again.');
     } finally {
@@ -376,14 +347,23 @@ class _AccountDialogState extends State<_AccountDialog> {
   }
 }
 
-String _authMessage(String code) => switch (code) {
+String _authMessage(String code, {bool google = false}) => switch (code) {
   'email-already-in-use' || 'credential-already-in-use' => 'That email already has an account. Sign in instead.',
   'invalid-email' => 'Enter a valid email address.',
   'weak-password' => 'Choose a stronger password.',
   'user-not-found' || 'wrong-password' || 'invalid-credential' => 'Email or password is incorrect.',
   'network-request-failed' => 'Connection lost. Check your internet and try again.',
+  'operation-not-allowed' when google => 'Google sign-in is not enabled for this Firebase project. Enable the Google provider in Firebase Authentication.',
   'operation-not-allowed' => 'Email and password sign-in is not enabled in Firebase yet.',
-  _ => 'Could not complete account setup. Try again.',
+  'unauthorized-domain' => 'This website is not authorized for Firebase sign-in. Add its domain in Firebase Authentication → Settings → Authorized domains.',
+  'popup-blocked' => 'Your browser blocked the Google sign-in window. Allow popups for this site and try again.',
+  'popup-closed-by-user' => 'Google sign-in was closed before it finished.',
+  'cancelled-popup-request' => 'Another Google sign-in window is already open. Finish or close it, then try again.',
+  'account-exists-with-different-credential' => 'An account already exists with this email. Sign in with its existing method, then link Google in Profile.',
+  'web-storage-unsupported' => 'This browser does not allow the storage needed for sign-in. Enable cookies and site storage, then try again.',
+  _ => google
+      ? 'Google sign-in failed ($code). Check the Firebase Google provider and authorized domain.'
+      : 'Account setup failed ($code). Try again or contact support if it continues.',
 };
 
 String _shortAddress(String address) =>
