@@ -31,6 +31,7 @@ class OriginSolanaService {
   );
 
   String? _authToken;
+  Uint8List? _walletPublicKey;
   String? connectedAddress;
   final Dio _api = Dio();
 
@@ -60,6 +61,7 @@ class OriginSolanaService {
       }
 
       _authToken = authorization.authToken;
+      _walletPublicKey = Uint8List.fromList(authorization.publicKey);
       connectedAddress = Ed25519HDPublicKey(authorization.publicKey).toBase58();
       return connectedAddress!;
     } finally {
@@ -70,6 +72,7 @@ class OriginSolanaService {
   Future<void> disconnectWallet() async {
     final authToken = _authToken;
     _authToken = null;
+    _walletPublicKey = null;
     connectedAddress = null;
     if (authToken == null || !supportsMobileWalletAdapter) return;
 
@@ -87,9 +90,43 @@ class OriginSolanaService {
     return (await _client.rpcClient.getBalance(address)).value;
   }
 
+  List<int>? get connectedPublicKey => _walletPublicKey;
+
+  Future<List<int>> signPublisherMessage(List<int> message) async {
+    final publicKey = _walletPublicKey;
+    final authToken = _authToken;
+    if (publicKey == null || authToken == null || !supportsMobileWalletAdapter) {
+      throw StateError('Connect your wallet before signing this content.');
+    }
+    final scenario = await LocalAssociationScenario.create();
+    try {
+      await scenario.startActivityForResult(null);
+      final wallet = await scenario.start();
+      final authorized = await wallet.reauthorize(
+        identityName: 'OriginChain',
+        authToken: authToken,
+      );
+      if (authorized == null) throw const WalletConnectionCancelled();
+      final result = await wallet.signMessages(
+        messages: [Uint8List.fromList(message)],
+        addresses: [publicKey],
+      );
+      if (result.signedMessages.length != 1 ||
+          result.signedMessages.single.signatures.length != 1) {
+        throw StateError('The wallet did not return a content signature.');
+      }
+      return result.signedMessages.single.signatures.single;
+    } finally {
+      await scenario.close();
+    }
+  }
+
   Future<String> commitManifest(OriginManifest manifest) async {
-    final publisherKey = await PublisherIdentityService.instance.solanaAddress;
-    if (base58encode(base64Decode(manifest.publisherKey)) != publisherKey) {
+    final manifestPublisher = base58encode(base64Decode(manifest.publisherKey));
+    final walletPublisher = connectedAddress;
+    final publisherKey = walletPublisher ??
+        await PublisherIdentityService.instance.solanaAddress;
+    if (manifestPublisher != publisherKey) {
       throw StateError(
         'The manifest publisher key does not match this device identity.',
       );
@@ -111,7 +148,9 @@ class OriginSolanaService {
     }
     if (transaction.compiledMessage.accountKeys.first.toBase58() !=
         response['feePayer']) {
-      throw StateError('The sponsored transaction has an unexpected fee payer.');
+      throw StateError(
+        'The sponsored transaction has an unexpected fee payer.',
+      );
     }
     final publicKey = transaction.compiledMessage.accountKeys[signerIndex];
     if (publicKey.toBase58() != publisherKey) {
@@ -120,8 +159,9 @@ class OriginSolanaService {
       );
     }
     final message = transaction.compiledMessage.toByteArray().toList();
-    final signedMessage = await PublisherIdentityService.instance
-        .signSolanaMessage(message);
+    final signedMessage = walletPublisher == null
+        ? await PublisherIdentityService.instance.signSolanaMessage(message)
+        : await signPublisherMessage(message);
     final signatures = List<Signature>.from(transaction.signatures);
     signatures[signerIndex] = Signature(
       signedMessage,
@@ -156,7 +196,9 @@ class OriginSolanaService {
   }
 
   Map<String, Object?> _manifestArgs(OriginManifest manifest) => {
-    'operation': 'register_asset',
+    'operation': manifest.parentVersionId == null
+        ? 'register_asset'
+        : 'append_version',
     'publisher': base58encode(base64Decode(manifest.publisherKey)),
     'assetId': manifest.assetId,
     'versionId': manifest.versionId,
@@ -164,6 +206,8 @@ class OriginSolanaService {
     'manifestHash': crypto.sha256
         .convert(utf8.encode(jsonEncode(manifest.toJson())))
         .toString(),
+    if (manifest.parentVersionId != null)
+      'parentVersionId': manifest.parentVersionId,
   };
 
   Future<Map<String, String>> _authHeaders() async {

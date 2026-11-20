@@ -1,98 +1,234 @@
 import 'package:flutter/material.dart';
 
 import '../../data/local/fingerprint_entry.dart';
+import '../../services/sharing/firestore_share_service.dart';
+import '../../services/sharing/origin_manifest.dart';
 
-class HomeScreen extends StatelessWidget {
+class HomeScreen extends StatefulWidget {
   const HomeScreen({
     required this.lastFingerprint,
     required this.onRegisterTap,
     required this.onVerifyTap,
+    required this.onFolderTap,
+    required this.onRecordTap,
     super.key,
   });
 
   final FingerprintEntry? lastFingerprint;
   final VoidCallback onRegisterTap;
   final VoidCallback onVerifyTap;
+  final ValueChanged<String?> onFolderTap;
+  final ValueChanged<String> onRecordTap;
+
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  late Future<_HomeData> _data;
+  bool _showReceived = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _data = _load();
+  }
+
+  Future<_HomeData> _load() async {
+    final service = FirestoreShareService.instance;
+    final results = await Future.wait([
+      service.listFolders(),
+      service.listOwnedRecords(),
+      service.listReceivedRecords(),
+    ]);
+    return _HomeData(
+      folders: results[0],
+      shared: results[1],
+      received: results[2],
+    );
+  }
+
+  Future<void> _refresh() async {
+    final next = _load();
+    setState(() => _data = next);
+    await next;
+  }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return CustomScrollView(
-      slivers: [
-        SliverPadding(
-          padding: const EdgeInsets.fromLTRB(24, 24, 24, 128),
-          sliver: SliverList.list(
-            children: [
-              Row(
-                children: [
-                  Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      color: theme.colorScheme.primaryContainer,
-                      borderRadius: BorderRadius.circular(14),
+    return RefreshIndicator(
+      onRefresh: _refresh,
+      child: CustomScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        slivers: [
+          SliverPadding(
+            padding: const EdgeInsets.fromLTRB(24, 18, 24, 112),
+            sliver: SliverList.list(
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text('Your space', style: theme.textTheme.headlineMedium),
                     ),
-                    child: Icon(
-                      Icons.all_inclusive_rounded,
-                      color: theme.colorScheme.primary,
+                    IconButton(
+                      tooltip: 'Scan or verify a file',
+                      onPressed: widget.onVerifyTap,
+                      icon: const Icon(Icons.qr_code_scanner_rounded),
                     ),
-                  ),
-                  const SizedBox(width: 11),
-                  Text(
-                    'ORIGINCHAIN',
-                    style: theme.textTheme.labelLarge?.copyWith(
-                      letterSpacing: 1.4,
-                      fontWeight: FontWeight.w800,
+                    IconButton(
+                      tooltip: 'Refresh',
+                      onPressed: _refresh,
+                      icon: const Icon(Icons.refresh_rounded),
                     ),
-                  ),
-                  const Spacer(),
-                  IconButton(
-                    tooltip: 'Open verification',
-                    onPressed: onVerifyTap,
-                    icon: const Icon(Icons.qr_code_scanner_rounded),
-                    style: IconButton.styleFrom(
-                      minimumSize: const Size(44, 44),
-                      backgroundColor: theme.colorScheme.surface,
-                      side: BorderSide(color: theme.colorScheme.outlineVariant),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 28),
-              Text(
-                'Your work,\nwith a clear origin.',
-                style: theme.textTheme.headlineMedium,
-              ),
-              const SizedBox(height: 10),
-              Text(
-                'Keep a record of what you create and the proof behind it.',
-                style: theme.textTheme.bodyLarge?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
+                  ],
                 ),
-              ),
-              const SizedBox(height: 24),
-              _OverviewCard(onRegisterTap: onRegisterTap),
-              const SizedBox(height: 26),
-              Row(
-                children: [
-                  Text('Recent activity', style: theme.textTheme.titleLarge),
-                  const Spacer(),
-                  Text(
-                    lastFingerprint == null ? '0 items' : '1 item',
-                    style: theme.textTheme.labelMedium?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
+                const SizedBox(height: 18),
+                _QuickActions(onRegister: widget.onRegisterTap, onVerify: widget.onVerifyTap),
+                const SizedBox(height: 26),
+                Row(
+                  children: [
+                    Text('Folders', style: theme.textTheme.titleLarge),
+                    const Spacer(),
+                    TextButton(
+                      onPressed: () => widget.onFolderTap(null),
+                      child: const Text('See files'),
                     ),
-                  ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                FutureBuilder<_HomeData>(
+                  future: _data,
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return const _FolderSkeletons();
+                    }
+                    if (snapshot.hasError) {
+                      return _RetryCard(onRetry: _refresh);
+                    }
+                    final data = snapshot.data!;
+                    if (data.folders.isEmpty) {
+                      return _EmptyFolders(onOpenLibrary: () => widget.onFolderTap(null));
+                    }
+                    final width = MediaQuery.sizeOf(context).width;
+                    final columns = width >= 900 ? 4 : width >= 600 ? 3 : 2;
+                    return GridView.builder(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      itemCount: data.folders.length,
+                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: columns,
+                        crossAxisSpacing: 10,
+                        mainAxisSpacing: 10,
+                        childAspectRatio: 2.15,
+                      ),
+                      itemBuilder: (context, index) {
+                        final folder = data.folders[index];
+                        final folderId = folder['id'] as String;
+                        final count = data.shared.where((record) => record['folderId'] == folderId).length;
+                        return _FolderCard(
+                          name: folder['name'] as String? ?? 'Folder',
+                          count: count,
+                          onTap: () => widget.onFolderTap(folderId),
+                        );
+                      },
+                    );
+                  },
+                ),
+                const SizedBox(height: 28),
+                Row(
+                  children: [
+                    Text('Shared work', style: theme.textTheme.titleLarge),
+                    const Spacer(),
+                    SegmentedButton<bool>(
+                      showSelectedIcon: false,
+                      segments: const [
+                        ButtonSegment(value: false, label: Text('By you')),
+                        ButtonSegment(value: true, label: Text('Received')),
+                      ],
+                      selected: {_showReceived},
+                      onSelectionChanged: (value) => setState(() => _showReceived = value.first),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                FutureBuilder<_HomeData>(
+                  future: _data,
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return const LinearProgressIndicator();
+                    }
+                    if (snapshot.hasError) return _RetryCard(onRetry: _refresh);
+                    final records = _showReceived ? snapshot.data!.received : snapshot.data!.shared;
+                    if (records.isEmpty) {
+                      return _EmptyWork(
+                        received: _showReceived,
+                        onVerify: widget.onVerifyTap,
+                        onRegister: widget.onRegisterTap,
+                      );
+                    }
+                    return Column(
+                      children: [
+                        for (final record in records.take(5))
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: _WorkRow(
+                              record: record,
+                              received: _showReceived,
+                              onTap: () => widget.onRecordTap(record['id'] as String),
+                            ),
+                          ),
+                      ],
+                    );
+                  },
+                ),
+                if (widget.lastFingerprint != null) ...[
+                  const SizedBox(height: 22),
+                  Text('On this device', style: theme.textTheme.titleMedium),
+                  const SizedBox(height: 8),
+                  _LocalFingerprint(entry: widget.lastFingerprint!),
                 ],
-              ),
-              const SizedBox(height: 12),
-              if (lastFingerprint == null)
-                _EmptyActivity(onRegisterTap: onRegisterTap)
-              else
-                _FingerprintActivity(fingerprint: lastFingerprint!),
-              const SizedBox(height: 24),
-              _PrivacyNote(),
-            ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HomeData {
+  const _HomeData({required this.folders, required this.shared, required this.received});
+  final List<Map<String, dynamic>> folders;
+  final List<Map<String, dynamic>> shared;
+  final List<Map<String, dynamic>> received;
+}
+
+class _QuickActions extends StatelessWidget {
+  const _QuickActions({required this.onRegister, required this.onVerify});
+  final VoidCallback onRegister;
+  final VoidCallback onVerify;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Row(
+      children: [
+        Expanded(
+          child: FilledButton.tonalIcon(
+            onPressed: onRegister,
+            icon: const Icon(Icons.add_rounded),
+            label: const Text('Register'),
+            style: FilledButton.styleFrom(alignment: Alignment.centerLeft, padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18)),
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: OutlinedButton.icon(
+            onPressed: onVerify,
+            icon: Icon(Icons.fact_check_outlined, color: theme.colorScheme.primary),
+            label: const Text('Verify'),
+            style: OutlinedButton.styleFrom(alignment: Alignment.centerLeft, padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18)),
           ),
         ),
       ],
@@ -100,195 +236,138 @@ class HomeScreen extends StatelessWidget {
   }
 }
 
-class _OverviewCard extends StatelessWidget {
-  const _OverviewCard({required this.onRegisterTap});
-
-  final VoidCallback onRegisterTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: theme.brightness == Brightness.dark
-              ? const [Color(0xFF3C2922), Color(0xFF30211B)]
-              : const [Color(0xFFF0DED5), Color(0xFFEBD7CB)],
-        ),
-        borderRadius: BorderRadius.circular(24),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Start with a fingerprint',
-                      style: theme.textTheme.titleLarge?.copyWith(
-                        color: theme.colorScheme.onPrimaryContainer,
-                      ),
-                    ),
-                    const SizedBox(height: 5),
-                    Text(
-                      'Create a local SHA-256 fingerprint for a file.',
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: theme.colorScheme.onPrimaryContainer.withValues(
-                          alpha: 0.78,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 12),
-              Icon(
-                Icons.auto_awesome_rounded,
-                size: 28,
-                color: theme.colorScheme.primary,
-              ),
-            ],
-          ),
-          const SizedBox(height: 18),
-          FilledButton.icon(
-            onPressed: onRegisterTap,
-            icon: const Icon(Icons.add_rounded),
-            label: const Text('Fingerprint a file'),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _EmptyActivity extends StatelessWidget {
-  const _EmptyActivity({required this.onRegisterTap});
-
-  final VoidCallback onRegisterTap;
+class _FolderCard extends StatelessWidget {
+  const _FolderCard({required this.name, required this.count, required this.onTap});
+  final String name;
+  final int count;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(18),
-        child: Row(
-          children: [
-            Icon(
-              Icons.history_rounded,
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                'Your activity will appear here.',
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
-              ),
-            ),
-            IconButton(
-              tooltip: 'Register an asset',
-              onPressed: onRegisterTap,
-              icon: const Icon(Icons.arrow_forward_rounded),
-            ),
-          ],
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          child: Row(children: [
+            Icon(Icons.folder_rounded, color: theme.colorScheme.primary),
+            const SizedBox(width: 10),
+            Expanded(child: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis, style: theme.textTheme.titleSmall)),
+            Text('$count', style: theme.textTheme.labelMedium?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+          ]),
         ),
       ),
     );
   }
 }
 
-class _FingerprintActivity extends StatelessWidget {
-  const _FingerprintActivity({required this.fingerprint});
+class _FolderSkeletons extends StatelessWidget {
+  const _FolderSkeletons();
+  @override
+  Widget build(BuildContext context) => const Row(children: [
+    Expanded(child: Card(child: SizedBox(height: 62))),
+    SizedBox(width: 10),
+    Expanded(child: Card(child: SizedBox(height: 62))),
+  ]);
+}
 
-  final FingerprintEntry fingerprint;
+class _EmptyFolders extends StatelessWidget {
+  const _EmptyFolders({required this.onOpenLibrary});
+  final VoidCallback onOpenLibrary;
+  @override
+  Widget build(BuildContext context) => Card(
+    child: ListTile(
+      leading: const Icon(Icons.create_new_folder_outlined),
+      title: const Text('Make a folder for your work'),
+      trailing: const Icon(Icons.arrow_forward_rounded),
+      onTap: onOpenLibrary,
+    ),
+  );
+}
 
+class _WorkRow extends StatelessWidget {
+  const _WorkRow({required this.record, required this.received, required this.onTap});
+  final Map<String, dynamic> record;
+  final bool received;
+  final VoidCallback onTap;
   @override
   Widget build(BuildContext context) {
+    final manifestData = record['manifest'];
+    if (manifestData is! Map) return const SizedBox.shrink();
+    final manifest = OriginManifest.fromJson(Map<String, dynamic>.from(manifestData));
     final theme = Theme.of(context);
     return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Row(
-          children: [
-            Container(
-              width: 42,
-              height: 42,
-              decoration: BoxDecoration(
-                color: theme.colorScheme.primaryContainer,
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: Icon(
-                Icons.fingerprint_rounded,
-                color: theme.colorScheme.primary,
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(fingerprint.fileName, style: theme.textTheme.titleSmall),
-                  const SizedBox(height: 4),
-                  Text(
-                    'Local · ${fingerprint.sha256.substring(0, 16)}…',
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
-                      fontFamily: 'monospace',
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            Icon(
-              Icons.check_circle_rounded,
-              color: theme.colorScheme.primary,
-              size: 20,
-            ),
-          ],
+      child: ListTile(
+        onTap: onTap,
+        leading: CircleAvatar(
+          backgroundColor: theme.colorScheme.primaryContainer,
+          foregroundColor: theme.colorScheme.primary,
+          child: Icon(_fileIcon(manifest.fileName)),
         ),
+        title: Text(manifest.fileName, maxLines: 1, overflow: TextOverflow.ellipsis),
+        subtitle: Text('${received ? 'Received' : 'Shared'} · ${_short(manifest.sha256)}'),
+        trailing: const Icon(Icons.chevron_right_rounded),
       ),
     );
   }
 }
 
-class _PrivacyNote extends StatelessWidget {
+class _EmptyWork extends StatelessWidget {
+  const _EmptyWork({required this.received, required this.onVerify, required this.onRegister});
+  final bool received;
+  final VoidCallback onVerify;
+  final VoidCallback onRegister;
   @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surface.withValues(alpha: 0.7),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: theme.colorScheme.outlineVariant),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(
-            Icons.lock_outline_rounded,
-            size: 19,
-            color: theme.colorScheme.primary,
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              'Your original files stay on your device unless you choose to share or store them.',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+  Widget build(BuildContext context) => Card(
+    child: Padding(
+      padding: const EdgeInsets.all(18),
+      child: Row(children: [
+        Icon(received ? Icons.inbox_outlined : Icons.share_outlined, color: Theme.of(context).colorScheme.primary),
+        const SizedBox(width: 12),
+        Expanded(child: Text(received ? 'Files you save from a share link appear here.' : 'Share a registered file to see it here.')),
+        IconButton(
+          tooltip: received ? 'Open verification' : 'Register a file',
+          onPressed: received ? onVerify : onRegister,
+          icon: const Icon(Icons.arrow_forward_rounded),
+        ),
+      ]),
+    ),
+  );
+}
+
+class _RetryCard extends StatelessWidget {
+  const _RetryCard({required this.onRetry});
+  final VoidCallback onRetry;
+  @override
+  Widget build(BuildContext context) => Card(
+    child: ListTile(
+      leading: const Icon(Icons.cloud_off_rounded),
+      title: const Text('Could not sync your workspace'),
+      trailing: IconButton(onPressed: onRetry, icon: const Icon(Icons.refresh_rounded)),
+    ),
+  );
+}
+
+class _LocalFingerprint extends StatelessWidget {
+  const _LocalFingerprint({required this.entry});
+  final FingerprintEntry entry;
+  @override
+  Widget build(BuildContext context) => Card(
+    child: ListTile(
+      leading: const Icon(Icons.fingerprint_rounded),
+      title: Text(entry.fileName, maxLines: 1, overflow: TextOverflow.ellipsis),
+      subtitle: Text('Local fingerprint · ${_short(entry.sha256)}'),
+    ),
+  );
+}
+
+String _short(String value) => '${value.substring(0, 16)}…';
+IconData _fileIcon(String fileName) {
+  final ext = fileName.contains('.') ? fileName.split('.').last.toLowerCase() : '';
+  if ({'jpg', 'jpeg', 'png', 'gif', 'webp', 'heic'}.contains(ext)) return Icons.image_rounded;
+  if ({'mp4', 'mov', 'm4v', 'webm', 'avi'}.contains(ext)) return Icons.movie_rounded;
+  if ({'mp3', 'wav', 'aac', 'm4a', 'flac'}.contains(ext)) return Icons.audio_file_rounded;
+  return Icons.description_rounded;
 }

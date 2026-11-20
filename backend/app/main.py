@@ -73,6 +73,14 @@ class UploadRequest(BaseModel):
     contentType: str = Field(min_length=1, max_length=255)
 
 
+class FolderRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=48)
+
+
+class FolderAssignmentRequest(BaseModel):
+    folderId: str | None = Field(default=None, max_length=64)
+
+
 class SponsoredTransactionRequest(BaseModel):
     operation: Literal["register_asset", "append_version"]
     publisher: str = Field(min_length=32, max_length=44)
@@ -119,6 +127,139 @@ def health():
             "sponsorshipConfigured": sponsor_ready,
         },
     }
+
+
+@app.get("/v1/records")
+def list_owned_records(user=Depends(require_user)):
+    """Return only the caller's share records for the Library projection."""
+    docs = (
+        firestore.client()
+        .collection("sharedRecords")
+        .where("ownerUid", "==", user["uid"])
+        .limit(200)
+        .stream()
+    )
+    records = []
+    for doc in docs:
+        value = doc.to_dict() or {}
+        created_at = value.get("createdAt")
+        records.append({
+            "id": doc.id,
+            "createdAt": created_at.isoformat() if created_at else None,
+            "manifest": value.get("manifest"),
+            "hasSharedFile": bool(value.get("fileStorage")),
+            "folderId": value.get("folderId"),
+        })
+    records.sort(key=lambda item: item.get("createdAt") or "", reverse=True)
+    return {"records": records}
+
+
+@app.get("/v1/records/{record_id}/history")
+def public_record_history(record_id: str):
+    _, record = get_record(record_id)
+    manifest = record.get("manifest") or {}
+    asset_id = manifest.get("assetId")
+    if not asset_id:
+        raise HTTPException(status_code=422, detail="Record has no asset identity.")
+    docs = (
+        firestore.client().collection("sharedRecords")
+        .where("manifest.assetId", "==", asset_id).limit(100).stream()
+    )
+    versions = []
+    for doc in docs:
+        value = doc.to_dict() or {}
+        created_at = value.get("createdAt")
+        versions.append({
+            "id": doc.id,
+            "createdAt": created_at.isoformat() if created_at else None,
+            "manifest": value.get("manifest"),
+        })
+    versions.sort(key=lambda item: item.get("createdAt") or "")
+    return {"versions": versions}
+
+
+@app.get("/v1/folders")
+def list_folders(user=Depends(require_user)):
+    docs = (
+        firestore.client()
+        .collection("users").document(user["uid"])
+        .collection("folders").stream()
+    )
+    folders = [{"id": doc.id, **(doc.to_dict() or {})} for doc in docs]
+    folders.sort(key=lambda item: item.get("name", "").casefold())
+    return {"folders": folders}
+
+
+@app.post("/v1/folders")
+def create_folder(body: FolderRequest, user=Depends(require_user)):
+    name = " ".join(body.name.split())
+    if not name:
+        raise HTTPException(status_code=422, detail="Folder name cannot be empty.")
+    collection = firestore.client().collection("users").document(user["uid"]).collection("folders")
+    existing = collection.where("name", "==", name).limit(1).get()
+    if existing:
+        raise HTTPException(status_code=409, detail="A folder with that name already exists.")
+    reference = collection.document()
+    reference.set({"name": name, "createdAt": firestore.SERVER_TIMESTAMP})
+    return {"id": reference.id, "name": name}
+
+
+@app.post("/v1/records/{record_id}/folder")
+def assign_record_folder(
+    record_id: str,
+    body: FolderAssignmentRequest,
+    user=Depends(require_user),
+):
+    reference, record = get_record(record_id)
+    if record.get("ownerUid") != user["uid"]:
+        raise HTTPException(status_code=403, detail="You do not own this record.")
+    if body.folderId is not None:
+        folder = (
+            firestore.client().collection("users").document(user["uid"])
+            .collection("folders").document(body.folderId).get()
+        )
+        if not folder.exists:
+            raise HTTPException(status_code=404, detail="Folder not found.")
+    reference.update({"folderId": body.folderId})
+    return {"assigned": True}
+
+
+@app.post("/v1/received/{record_id}")
+def save_received_record(record_id: str, user=Depends(require_user)):
+    _, record = get_record(record_id)
+    if record.get("ownerUid") == user["uid"]:
+        raise HTTPException(status_code=409, detail="This record is already in your shared work.")
+    reference = (
+        firestore.client().collection("users").document(user["uid"])
+        .collection("received").document(record_id)
+    )
+    reference.set({"recordId": record_id, "savedAt": firestore.SERVER_TIMESTAMP})
+    return {"saved": True}
+
+
+@app.get("/v1/received")
+def list_received_records(user=Depends(require_user)):
+    database = firestore.client()
+    refs = (
+        database.collection("users").document(user["uid"])
+        .collection("received").limit(200).stream()
+    )
+    records = []
+    for saved in refs:
+        record_id = saved.id
+        source = database.collection("sharedRecords").document(record_id).get()
+        if not source.exists:
+            continue
+        value = source.to_dict() or {}
+        created_at = value.get("createdAt")
+        records.append({
+            "id": record_id,
+            "createdAt": created_at.isoformat() if created_at else None,
+            "manifest": value.get("manifest"),
+            "hasSharedFile": bool(value.get("fileStorage")),
+        })
+    records.sort(key=lambda item: item.get("createdAt") or "", reverse=True)
+    return {"records": records}
 
 
 @app.post("/v1/solana/transactions")

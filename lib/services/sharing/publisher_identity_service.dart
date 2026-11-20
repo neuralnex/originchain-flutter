@@ -16,14 +16,37 @@ class PublisherIdentityService {
   static const _secureStorage = FlutterSecureStorage();
   static final _algorithm = Ed25519();
 
-  Future<OriginManifest> createManifest(FingerprintEntry fingerprint) async {
-    final pair = await _loadOrCreateKeyPair();
-    final publicKey = await pair.extractPublicKey();
+  Future<OriginManifest> createManifest(
+    FingerprintEntry fingerprint, {
+    OriginManifest? parent,
+    List<int>? signerPublicKey,
+    Future<List<int>> Function(List<int>)? externalSigner,
+  }) async {
+    final SimplePublicKey publicKey;
+    final SimpleKeyPair? pair;
+    if (signerPublicKey == null) {
+      pair = await _loadOrCreateKeyPair();
+      publicKey = await pair.extractPublicKey();
+    } else {
+      if (signerPublicKey.length != 32 || externalSigner == null) {
+        throw ArgumentError('A 32-byte publisher key and signer are required.');
+      }
+      pair = null;
+      publicKey = SimplePublicKey(
+        signerPublicKey,
+        type: KeyPairType.ed25519,
+      );
+    }
     final publicKeyBase64 = base64Encode(publicKey.bytes);
+    if (parent != null && parent.sha256 == fingerprint.sha256) {
+      throw StateError(
+        'This file matches the latest version. No new version was created.',
+      );
+    }
     final createdAt = fingerprint.createdAtUtc.toUtc();
     final basePayload = <String, Object?>{
       'schema': 'originchain.manifest.v1',
-      'assetId': '',
+      'assetId': parent?.assetId ?? '',
       'versionId': '',
       'file': {
         'name': fingerprint.fileName,
@@ -33,8 +56,15 @@ class PublisherIdentityService {
       },
       'createdAt': createdAt.toIso8601String(),
       'publisher': {'ed25519PublicKey': publicKeyBase64},
+      if (parent != null) 'parentVersionId': parent.versionId,
     };
-    final assetId = _sha256('$publicKeyBase64:${fingerprint.sha256}');
+    if (parent != null && parent.publisherKey != publicKeyBase64) {
+      throw StateError(
+        'This device cannot append to another publisher identity.',
+      );
+    }
+    final assetId =
+        parent?.assetId ?? _sha256('$publicKeyBase64:${fingerprint.sha256}');
     basePayload['assetId'] = assetId;
     basePayload['versionId'] = OriginManifest.makeVersionId(basePayload);
 
@@ -47,11 +77,18 @@ class PublisherIdentityService {
       createdAt: createdAt,
       publisherKey: publicKeyBase64,
       signature: '',
+      parentVersionId: parent?.versionId,
     );
-    final signature = await _algorithm.sign(
-      utf8.encode('originchain:manifest:v1\n${unsigned.canonicalPayload()}'),
-      keyPair: pair,
+    final message = utf8.encode(
+      'originchain:manifest:v1\n${unsigned.canonicalPayload()}',
     );
+    final signatureBytes = pair == null
+        ? await externalSigner!(message)
+        : (await _algorithm.sign(message, keyPair: pair)).bytes;
+    final signature = Signature(signatureBytes, publicKey: publicKey);
+    if (!await _algorithm.verify(message, signature: signature)) {
+      throw StateError('The publisher wallet returned an invalid signature.');
+    }
     return OriginManifest(
       assetId: unsigned.assetId,
       versionId: unsigned.versionId,
@@ -60,7 +97,8 @@ class PublisherIdentityService {
       sha256: unsigned.sha256,
       createdAt: unsigned.createdAt,
       publisherKey: unsigned.publisherKey,
-      signature: base64Encode(signature.bytes),
+      signature: base64Encode(signatureBytes),
+      parentVersionId: unsigned.parentVersionId,
     );
   }
 
@@ -78,10 +116,13 @@ class PublisherIdentityService {
         ),
       );
       if (!valid) return false;
-      final expectedAssetId = _sha256(
-        '${manifest.publisherKey}:${manifest.sha256}',
-      );
-      return manifest.assetId == expectedAssetId &&
+      final rootHasExpectedId =
+          manifest.parentVersionId != null ||
+          manifest.assetId ==
+              _sha256('${manifest.publisherKey}:${manifest.sha256}');
+      return rootHasExpectedId &&
+          (manifest.parentVersionId == null ||
+              RegExp(r'^[0-9a-f]{64}$').hasMatch(manifest.parentVersionId!)) &&
           manifest.versionId ==
               OriginManifest.makeVersionId(manifest.payload());
     } catch (_) {

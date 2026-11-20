@@ -44,6 +44,8 @@ The first share creates a device signing key in platform secure storage. This is
 
 The FastAPI bridge in `backend/` issues short-lived S3-compatible upload/download URLs. The app sends bytes directly to Neon, then the API streams the stored object through SHA-256 and checks its size against the signed manifest before attaching the object key to Firestore. Neon credentials stay on the server. A shared download link is available to anyone holding the share record URL while its signed download URL remains valid.
 
+The Library calls the authenticated `GET /v1/records` endpoint, which returns only the current Firebase user's records. Records sharing an `assetId` are grouped into version history. Registering a changed file from an asset creates a signed manifest that names the prior `versionId` and submits the Anchor `append_version` instruction; a matching file is rejected locally without consuming a sponsored transaction.
+
 ### Configure Neon and the API
 
 Create a private Neon Object Storage bucket and obtain its S3 endpoint, region, access key, and secret. Neon documents the S3-compatible endpoint and credentials in its [Object Storage setup guide](https://neon.com/docs/storage/get-started). Keep credentials in a local untracked env file for development or Render environment secrets. Never place them in Flutter build defines, Firebase config, or the repository.

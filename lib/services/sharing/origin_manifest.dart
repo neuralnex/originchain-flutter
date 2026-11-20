@@ -12,6 +12,7 @@ class OriginManifest {
     required this.createdAt,
     required this.publisherKey,
     required this.signature,
+    this.parentVersionId,
   });
 
   final String assetId;
@@ -22,6 +23,7 @@ class OriginManifest {
   final DateTime createdAt;
   final String publisherKey;
   final String signature;
+  final String? parentVersionId;
 
   Map<String, Object?> payload() => {
     'schema': 'originchain.manifest.v1',
@@ -35,6 +37,7 @@ class OriginManifest {
     },
     'createdAt': createdAt.toUtc().toIso8601String(),
     'publisher': {'ed25519PublicKey': publisherKey},
+    if (parentVersionId != null) 'parentVersionId': parentVersionId,
   };
 
   String canonicalPayload() => jsonEncode(payload());
@@ -69,6 +72,7 @@ class OriginManifest {
       createdAt: DateTime.parse(_requiredString(value, 'createdAt')).toUtc(),
       publisherKey: _requiredString(publisher, 'ed25519PublicKey'),
       signature: _requiredString(signature, 'value'),
+      parentVersionId: value['parentVersionId'] as String?,
     );
     if (file['hashAlgorithm'] != 'sha256' ||
         !RegExp(r'^[0-9a-f]{64}$').hasMatch(parsed.sha256)) {

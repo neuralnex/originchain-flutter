@@ -10,9 +10,10 @@ import '../../services/sharing/neon_share_service.dart';
 import '../../services/solana/origin_solana_service.dart';
 
 class VerifyScreen extends StatefulWidget {
-  const VerifyScreen({this.recordId, super.key});
+  const VerifyScreen({this.recordId, this.onSavedToHome, super.key});
 
   final String? recordId;
+  final VoidCallback? onSavedToHome;
 
   @override
   State<VerifyScreen> createState() => _VerifyScreenState();
@@ -29,6 +30,9 @@ class _VerifyScreenState extends State<VerifyScreen> {
   bool _hasSharedFile = false;
   String? _loadedRecordId;
   String? _solanaStatus;
+  List<Map<String, dynamic>> _history = const [];
+  bool _savingToHome = false;
+  bool _savedToHome = false;
 
   @override
   void initState() {
@@ -57,6 +61,8 @@ class _VerifyScreenState extends State<VerifyScreen> {
       _fileResult = null;
       _manifest = null;
       _solanaStatus = null;
+      _history = const [];
+      _savedToHome = false;
     });
     try {
       final manifest = await FirestoreShareService.instance.readPublicRecord(
@@ -69,6 +75,14 @@ class _VerifyScreenState extends State<VerifyScreen> {
       final fileObject = await FirestoreShareService.instance.readFileObject(
         recordId,
       );
+      var history = <Map<String, dynamic>>[];
+      try {
+        history = await FirestoreShareService.instance.readPublicHistory(recordId);
+      } catch (_) {
+        history = [
+          {'id': recordId, 'manifest': manifest.toJson()},
+        ];
+      }
       final receipt = await FirestoreShareService.instance.readSolanaReceipt(
         recordId,
       );
@@ -96,6 +110,7 @@ class _VerifyScreenState extends State<VerifyScreen> {
           _hasSharedFile = fileObject != null;
           _loadedRecordId = recordId;
           _solanaStatus = solanaStatus;
+          _history = history;
         });
       }
     } catch (error) {
@@ -110,6 +125,30 @@ class _VerifyScreenState extends State<VerifyScreen> {
       }
     } finally {
       if (mounted) setState(() => _loadingRecord = false);
+    }
+  }
+
+  Future<void> _saveToHome() async {
+    final recordId = _loadedRecordId;
+    if (recordId == null) return;
+    setState(() => _savingToHome = true);
+    try {
+      await FirestoreShareService.instance.saveReceivedRecord(recordId);
+      widget.onSavedToHome?.call();
+      if (mounted) {
+        setState(() => _savedToHome = true);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Added to your received work')),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not save this record. It may already be in your shared work.')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _savingToHome = false);
     }
   }
 
@@ -150,10 +189,20 @@ class _VerifyScreenState extends State<VerifyScreen> {
       final selected = files.first;
       final digest = await sha256.bind(selected.readAsByteStream()).first;
       if (!mounted) return;
+      final digestValue = digest.toString();
+      final matchingIndex = _history.indexWhere((record) {
+        final raw = record['manifest'];
+        return raw is Map && raw['file'] is Map && raw['file']['hash'] == digestValue;
+      });
       setState(() {
-        _fileResult = digest.toString() == manifest.sha256
-            ? 'Match: this file has the fingerprint in the signed record.'
-            : 'No match: this file differs from the fingerprint in the record.';
+        if (matchingIndex < 0) {
+          _fileResult = 'No registered version matches. The file may have changed or may never have been registered; this check alone cannot tell which.';
+        } else if (_manifestFromRecord(_history[matchingIndex]).versionId == manifest.versionId) {
+          _fileResult = 'Exact match · these bytes match the selected registered version.';
+        } else {
+          final matched = _manifestFromRecord(_history[matchingIndex]);
+          _fileResult = 'Matches another registered version: ${matched.fileName} · ${_shortHash(matched.versionId)}. It differs from the version in this link.';
+        }
       });
     } catch (_) {
       if (mounted) {
@@ -176,7 +225,7 @@ class _VerifyScreenState extends State<VerifyScreen> {
               Text('Verify', style: theme.textTheme.headlineMedium),
               const SizedBox(height: 8),
               Text(
-                'Check a shared fingerprint record, then compare it with a file.',
+                'See what this file matches and what changed.',
                 style: theme.textTheme.bodyLarge?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
                 ),
@@ -191,8 +240,8 @@ class _VerifyScreenState extends State<VerifyScreen> {
                       TextField(
                         controller: _recordController,
                         decoration: const InputDecoration(
-                          labelText: 'Share record ID',
-                          hintText: 'Paste an OriginChain share link or ID',
+                          labelText: 'Share link or record ID',
+                          hintText: 'Paste a proof link',
                           border: OutlineInputBorder(),
                         ),
                         onSubmitted: (_) => _loadRecord(),
@@ -201,7 +250,7 @@ class _VerifyScreenState extends State<VerifyScreen> {
                       FilledButton(
                         onPressed: _loadingRecord ? null : () => _loadRecord(),
                         child: Text(
-                          _loadingRecord ? 'Loading record…' : 'Load record',
+                          _loadingRecord ? 'Loading proof…' : 'Check proof',
                         ),
                       ),
                       if (_recordError != null) ...[
@@ -218,7 +267,11 @@ class _VerifyScreenState extends State<VerifyScreen> {
                           style: theme.textTheme.titleMedium,
                         ),
                         const SizedBox(height: 5),
-                        Text('Signed device identity · signature valid'),
+                        Row(children: [
+                          Icon(Icons.verified_user_rounded, size: 18, color: theme.colorScheme.primary),
+                          const SizedBox(width: 7),
+                          const Text('Publisher signature valid'),
+                        ]),
                         const SizedBox(height: 5),
                         Text(_solanaStatus ?? 'Checking Solana registration…'),
                         const SizedBox(height: 8),
@@ -252,7 +305,21 @@ class _VerifyScreenState extends State<VerifyScreen> {
                             ),
                           ),
                           const SizedBox(height: 8),
+                        ] else ...[
+                          Text(
+                            'Proof only · original file was not shared',
+                            style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                          ),
+                          const SizedBox(height: 8),
                         ],
+                        OutlinedButton.icon(
+                          onPressed: _savingToHome || _savedToHome ? null : _saveToHome,
+                          icon: _savingToHome
+                              ? const SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                              : Icon(_savedToHome ? Icons.check_rounded : Icons.add_to_drive_rounded),
+                          label: Text(_savedToHome ? 'Saved to received work' : 'Save to your home'),
+                        ),
+                        const SizedBox(height: 8),
                         OutlinedButton.icon(
                           onPressed: _checkingFile ? null : _compareFile,
                           icon: _checkingFile
@@ -272,114 +339,24 @@ class _VerifyScreenState extends State<VerifyScreen> {
                           Text(
                             _fileResult!,
                             style: theme.textTheme.bodyMedium?.copyWith(
-                              color: _fileResult!.startsWith('Match:')
+                              color: _fileResult!.startsWith('Exact match') ||
+                                      _fileResult!.startsWith('Matches another')
                                   ? theme.colorScheme.primary
-                                  : theme.colorScheme.error,
+                                  : _fileResult!.startsWith('Could not')
+                                  ? theme.colorScheme.error
+                                  : theme.colorScheme.onSurfaceVariant,
                             ),
                           ),
                         ],
-                        const SizedBox(height: 8),
-                        Text(
-                          'The Solana result above checks whether this manifest is committed on devnet. The publisher key is self-issued and is not linked to a verified person or wallet.',
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: theme.colorScheme.onSurfaceVariant,
-                          ),
-                        ),
                       ],
                     ],
                   ),
                 ),
               ),
-              const SizedBox(height: 24),
-              Container(
-                height: 212,
-                decoration: BoxDecoration(
-                  color: theme.colorScheme.primaryContainer,
-                  borderRadius: BorderRadius.circular(28),
-                ),
-                child: Stack(
-                  children: [
-                    Positioned(
-                      right: -24,
-                      top: -32,
-                      child: Icon(
-                        Icons.blur_on_rounded,
-                        size: 190,
-                        color: theme.colorScheme.primary.withValues(
-                          alpha: 0.08,
-                        ),
-                      ),
-                    ),
-                    Center(
-                      child: Container(
-                        width: 92,
-                        height: 92,
-                        decoration: BoxDecoration(
-                          color: theme.colorScheme.surface.withValues(
-                            alpha: 0.76,
-                          ),
-                          borderRadius: BorderRadius.circular(30),
-                        ),
-                        child: Icon(
-                          Icons.qr_code_scanner_rounded,
-                          size: 42,
-                          color: theme.colorScheme.primary,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 22),
-              Text(
-                'What verification checks',
-                style: theme.textTheme.titleLarge,
-              ),
-              const SizedBox(height: 12),
-              const _VerifyDetail(
-                icon: Icons.fingerprint_rounded,
-                title: 'File fingerprint',
-                body: 'Whether the selected content matches the fingerprint in a record.',
-              ),
-              const SizedBox(height: 10),
-              const _VerifyDetail(
-                icon: Icons.draw_outlined,
-                title: 'Publisher signature',
-                body: 'Whether the record was signed by the identity it names.',
-              ),
-              const SizedBox(height: 10),
-              const _VerifyDetail(
-                icon: Icons.link_rounded,
-                title: 'Solana commitment',
-                body: 'Whether the provenance commitment can be found and checked on-chain.',
-              ),
-              const SizedBox(height: 18),
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: theme.colorScheme.surface,
-                  borderRadius: BorderRadius.circular(18),
-                  border: Border.all(color: theme.colorScheme.outlineVariant),
-                ),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Icon(
-                      Icons.info_outline_rounded,
-                      color: theme.colorScheme.primary,
-                    ),
-                    const SizedBox(width: 11),
-                    Expanded(
-                      child: Text(
-                        'The share record is publicly readable. Matching the fingerprint proves the bytes match that record; it does not prove legal ownership or authorship.',
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: theme.colorScheme.onSurfaceVariant,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+              if (_manifest != null) ...[
+                const SizedBox(height: 20),
+                _ProvenanceStory(history: _history, selected: _manifest!),
+              ],
             ],
           ),
         ),
@@ -388,27 +365,80 @@ class _VerifyScreenState extends State<VerifyScreen> {
   }
 }
 
-class _VerifyDetail extends StatelessWidget {
-  const _VerifyDetail({
-    required this.icon,
-    required this.title,
-    required this.body,
-  });
+OriginManifest _manifestFromRecord(Map<String, dynamic> record) {
+  final raw = record['manifest'];
+  if (raw is! Map) throw const FormatException('Invalid provenance version.');
+  return OriginManifest.fromJson(Map<String, dynamic>.from(raw));
+}
 
-  final IconData icon;
-  final String title;
-  final String body;
+String _shortHash(String value) => value.length < 10
+    ? value
+    : '${value.substring(0, 8)}…${value.substring(value.length - 4)}';
+
+class _ProvenanceStory extends StatelessWidget {
+  const _ProvenanceStory({required this.history, required this.selected});
+
+  final List<Map<String, dynamic>> history;
+  final OriginManifest selected;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final versions = <OriginManifest>[];
+    for (final record in history) {
+      try {
+        versions.add(_manifestFromRecord(record));
+      } on FormatException {
+        continue;
+      }
+    }
+    versions.sort((a, b) => a.createdAt.compareTo(b.createdAt));
     return Card(
-      child: ListTile(
-        leading: Icon(icon, color: theme.colorScheme.primary),
-        title: Text(title),
-        subtitle: Text(body),
-        isThreeLine: true,
+      child: Padding(
+        padding: const EdgeInsets.all(18),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('File story', style: theme.textTheme.titleLarge),
+            const SizedBox(height: 14),
+            for (var i = 0; i < versions.length; i++) ...[
+              Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Column(children: [
+                  Icon(
+                    versions[i].versionId == selected.versionId
+                        ? Icons.radio_button_checked_rounded
+                        : Icons.check_circle_rounded,
+                    size: 19,
+                    color: theme.colorScheme.primary,
+                  ),
+                  if (i != versions.length - 1)
+                    Container(width: 2, height: 34, color: theme.colorScheme.outlineVariant),
+                ]),
+                const SizedBox(width: 12),
+                Expanded(child: Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Text(i == 0 ? 'First registered version' : 'Changed version', style: theme.textTheme.titleSmall),
+                    const SizedBox(height: 2),
+                    Text('${versions[i].fileName} · ${_shortHash(versions[i].versionId)}', style: theme.textTheme.bodySmall),
+                    Text(_formatDate(versions[i].createdAt), style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+                  ]),
+                )),
+              ]),
+            ],
+            Text(
+              'This history shows registered versions. Unregistered edits may not appear here.',
+              style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+            ),
+          ],
+        ),
       ),
     );
   }
+}
+
+String _formatDate(DateTime date) {
+  final local = date.toLocal();
+  String two(int value) => value.toString().padLeft(2, '0');
+  return '${local.year}-${two(local.month)}-${two(local.day)} · ${two(local.hour)}:${two(local.minute)}';
 }

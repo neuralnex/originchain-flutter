@@ -17,6 +17,8 @@ import 'features/onboarding/welcome_screen.dart';
 import 'features/profile/profile_screen.dart';
 import 'features/registration/register_screen.dart';
 import 'features/verification/verify_screen.dart';
+import 'services/sharing/origin_manifest.dart';
+import 'services/solana/origin_solana_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -170,31 +172,139 @@ class _OriginShellState extends State<OriginShell> {
     _Destination('Verify', Icons.verified_outlined, Icons.verified_rounded),
     _Destination('Profile', Icons.person_outline, Icons.person_rounded),
   ];
+  OriginManifest? _versionParent;
+  int _libraryRevision = 0;
+  String? _selectedFolderId;
+  String? _recordToVerify;
+  String? _walletAddress = OriginSolanaService.instance.connectedAddress;
+  bool _walletBusy = false;
+
+  Future<void> _connectWallet() async {
+    setState(() => _walletBusy = true);
+    try {
+      final address = await OriginSolanaService.instance.connectWallet();
+      if (!mounted) return;
+      setState(() => _walletAddress = address);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Wallet connected. You sign; OriginChain pays network fees.')),
+      );
+    } on WalletConnectionCancelled {
+      // A wallet cancellation is an expected user choice.
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(error is StateError ? error.message : 'Wallet connection failed.')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _walletBusy = false);
+    }
+  }
+
+  Future<void> _disconnectWallet() async {
+    setState(() => _walletBusy = true);
+    try {
+      await OriginSolanaService.instance.disconnectWallet();
+      if (mounted) setState(() => _walletAddress = null);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not disconnect this wallet.')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _walletBusy = false);
+    }
+  }
 
   void _select(int index) => setState(() => _selectedIndex = index);
+
+  void _startVersion(OriginManifest parent) {
+    setState(() {
+      _versionParent = parent;
+      _selectedIndex = 2;
+    });
+  }
+
+  void _registrationComplete() {
+    setState(() {
+      _libraryRevision++;
+    });
+  }
+
+  void _startNewAsset() {
+    setState(() {
+      _versionParent = null;
+      _selectedIndex = 2;
+    });
+  }
+
+  void _openFolder(String? folderId) {
+    setState(() {
+      _selectedFolderId = folderId;
+      _selectedIndex = 1;
+    });
+  }
+
+  void _openRecord(String recordId) {
+    setState(() {
+      _recordToVerify = recordId;
+      _selectedIndex = 3;
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
     final pages = [
       HomeScreen(
+        key: ValueKey('home-$_libraryRevision'),
         lastFingerprint: widget.lastFingerprint,
-        onRegisterTap: () => _select(2),
+        onRegisterTap: _startNewAsset,
         onVerifyTap: () => _select(3),
+        onFolderTap: _openFolder,
+        onRecordTap: _openRecord,
       ),
-      LibraryScreen(onRegisterTap: () => _select(2)),
-      RegisterScreen(onFingerprintReady: widget.onFingerprintReady),
+      LibraryScreen(
+        key: ValueKey('$_libraryRevision-${_selectedFolderId ?? 'all'}'),
+        initialFolderId: _selectedFolderId,
+        onRegisterTap: _startNewAsset,
+        onNewVersion: _startVersion,
+      ),
+      RegisterScreen(
+        key: ValueKey(_versionParent?.versionId ?? 'new-asset'),
+        onFingerprintReady: widget.onFingerprintReady,
+        parentManifest: _versionParent,
+        onRegistered: _registrationComplete,
+        onOpenExisting: _openRecord,
+      ),
       VerifyScreen(
-        recordId: kIsWeb ? Uri.base.queryParameters['record'] : null,
+        key: ValueKey(_recordToVerify ?? (kIsWeb ? Uri.base.queryParameters['record'] : null)),
+        recordId: _recordToVerify ?? (kIsWeb ? Uri.base.queryParameters['record'] : null),
+        onSavedToHome: _registrationComplete,
       ),
       ProfileScreen(
         themeMode: widget.themeMode,
         onThemeModeChanged: widget.onThemeModeChanged,
+        walletAddress: _walletAddress,
+        walletBusy: _walletBusy,
+        supportsWallet: OriginSolanaService.instance.supportsMobileWalletAdapter,
+        onConnectWallet: _connectWallet,
+        onDisconnectWallet: _disconnectWallet,
       ),
     ];
     final reduceTransparency = MediaQuery.highContrastOf(context);
     final isWide = MediaQuery.sizeOf(context).width >= 900;
 
     return Scaffold(
+      appBar: AppBar(
+        title: Text(_destinations[_selectedIndex].label),
+        actions: [
+          Padding(
+            padding: const EdgeInsets.only(right: 16),
+            child: _walletButton(context),
+          ),
+        ],
+      ),
       extendBody: !isWide,
       body: SafeArea(
         top: true,
@@ -303,6 +413,33 @@ class _OriginShellState extends State<OriginShell> {
                 ),
               ),
             ),
+    );
+  }
+
+  Widget _walletButton(BuildContext context) {
+    final supports = OriginSolanaService.instance.supportsMobileWalletAdapter;
+    final address = _walletAddress;
+    return OutlinedButton.icon(
+      onPressed: _walletBusy
+          ? null
+          : !supports
+          ? () => ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Wallet signing is available through Android Mobile Wallet Adapter. This platform uses your device signing key.'),
+              ),
+            )
+          : address == null
+          ? _connectWallet
+          : _disconnectWallet,
+      icon: _walletBusy
+          ? const SizedBox.square(
+              dimension: 16,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          : Icon(address == null ? Icons.account_balance_wallet_outlined : Icons.account_balance_wallet_rounded),
+      label: Text(
+        address == null ? 'Connect wallet' : '${address.substring(0, 4)}…${address.substring(address.length - 4)}',
+      ),
     );
   }
 }
