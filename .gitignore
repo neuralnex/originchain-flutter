@@ -12,6 +12,10 @@ doc/api/
 
 # dotenv environment variables file
 .env*
+!.env.example
+backend/.venv/
+__pycache__/
+*.py[cod]
 
 # Avoid committing generated Javascript files:
 *.dart.js

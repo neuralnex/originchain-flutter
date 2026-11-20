@@ -1,8 +1,12 @@
 import 'package:crypto/crypto.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../../data/local/fingerprint_entry.dart';
+import '../../services/sharing/firestore_share_service.dart';
+import '../../services/sharing/neon_share_service.dart';
+import '../../services/sharing/publisher_identity_service.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({required this.onFingerprintReady, super.key});
@@ -17,12 +21,18 @@ class _RegisterScreenState extends State<RegisterScreen> {
   bool _isHashing = false;
   String? _error;
   FingerprintEntry? _fingerprint;
+  PlatformFile? _selectedFile;
+  String? _shareUrl;
+  String? _pendingRecordId;
+  bool _isPublishing = false;
 
   Future<void> _chooseFile() async {
     setState(() {
       _isHashing = true;
       _error = null;
       _fingerprint = null;
+      _selectedFile = null;
+      _pendingRecordId = null;
     });
     try {
       final files = await FilePicker.pickFiles();
@@ -42,6 +52,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       if (!mounted) return;
       setState(() {
         _fingerprint = value;
+        _selectedFile = file;
         _isHashing = false;
       });
       await widget.onFingerprintReady(value);
@@ -63,6 +74,53 @@ class _RegisterScreenState extends State<RegisterScreen> {
     }
   }
 
+  Future<void> _publishAndShare(FingerprintEntry fingerprint) async {
+    setState(() {
+      _isPublishing = true;
+      _error = null;
+    });
+    try {
+      var recordId = _pendingRecordId;
+      if (recordId == null) {
+        final manifest = await PublisherIdentityService.instance.createManifest(
+          fingerprint,
+        );
+        recordId = await FirestoreShareService.instance.publish(manifest);
+        _pendingRecordId = recordId;
+      }
+      final file = _selectedFile;
+      if (file == null) {
+        throw StateError('Choose the file again before sharing.');
+      }
+      await NeonShareService.instance.uploadFile(
+        recordId: recordId,
+        file: file,
+        sha256: fingerprint.sha256,
+      );
+      _pendingRecordId = null;
+      final link = Uri.https('gen-lang-client-0915748775.web.app', '/', {
+        'record': recordId,
+      });
+      if (!mounted) return;
+      setState(() => _shareUrl = link.toString());
+      await SharePlus.instance.share(
+        ShareParams(
+          uri: link,
+          title: 'OriginChain file fingerprint',
+          subject: 'Verify ${fingerprint.fileName}',
+        ),
+      );
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _error = error is StateError ? error.message : 'Could not publish and upload this file. Check the API connection, Firebase Anonymous Authentication, Firestore, and Neon configuration.';
+        });
+      }
+    } finally {
+      if (mounted) setState(() => _isPublishing = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -75,7 +133,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
               Text('Register', style: theme.textTheme.headlineMedium),
               const SizedBox(height: 8),
               Text(
-                'Create a SHA-256 fingerprint on this device. Your file is not uploaded.',
+                'Create a SHA-256 fingerprint on this device. Choose when to upload the file for sharing.',
                 style: theme.textTheme.bodyLarge?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
                 ),
@@ -104,7 +162,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       ),
                       const SizedBox(height: 8),
                       Text(
-                        'Only the fingerprint is computed here. Nothing is sent to OriginChain or Solana.',
+                        'The file is fingerprinted locally first. Upload happens only when you tap Upload file & share.',
                         style: theme.textTheme.bodyMedium?.copyWith(
                           color: theme.colorScheme.onSurfaceVariant,
                         ),
@@ -144,7 +202,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
               ),
               if (_fingerprint case final fingerprint?) ...[
                 const SizedBox(height: 18),
-                _FingerprintCard(fingerprint: fingerprint),
+                _FingerprintCard(
+                  fingerprint: fingerprint,
+                  shareUrl: _shareUrl,
+                  isPublishing: _isPublishing,
+                  onPublish: () => _publishAndShare(fingerprint),
+                ),
               ],
             ],
           ),
@@ -196,9 +259,17 @@ class _HowItWorks extends StatelessWidget {
 }
 
 class _FingerprintCard extends StatelessWidget {
-  const _FingerprintCard({required this.fingerprint});
+  const _FingerprintCard({
+    required this.fingerprint,
+    required this.isPublishing,
+    required this.onPublish,
+    this.shareUrl,
+  });
 
   final FingerprintEntry fingerprint;
+  final String? shareUrl;
+  final bool isPublishing;
+  final VoidCallback onPublish;
 
   @override
   Widget build(BuildContext context) {
@@ -238,11 +309,33 @@ class _FingerprintCard extends StatelessWidget {
             ),
             const SizedBox(height: 10),
             Text(
-              'This is a local fingerprint. It has not been registered on Solana.',
+              'This uploads the original file to private Neon Object Storage. The public Firestore record includes its name, size, fingerprint, and device-key signature. Anyone with the share link can download the file. This record is not on Solana yet.',
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
               ),
             ),
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: isPublishing ? null : onPublish,
+                icon: isPublishing
+                    ? const SizedBox.square(
+                        dimension: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.share_rounded),
+                label: Text(
+                  isPublishing
+                      ? 'Uploading & publishing…'
+                      : 'Upload file & share',
+                ),
+              ),
+            ),
+            if (shareUrl != null) ...[
+              const SizedBox(height: 10),
+              SelectableText(shareUrl!, style: theme.textTheme.bodySmall),
+            ],
           ],
         ),
       ),

@@ -20,9 +20,7 @@ import 'features/verification/verify_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
-  );
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   if (kIsWeb) {
     databaseFactory = databaseFactoryFfiWeb;
   }
@@ -161,7 +159,9 @@ class OriginShell extends StatefulWidget {
 }
 
 class _OriginShellState extends State<OriginShell> {
-  int _selectedIndex = 0;
+  int _selectedIndex = kIsWeb && Uri.base.queryParameters.containsKey('record')
+      ? 3
+      : 0;
 
   static const _destinations = [
     _Destination('Home', Icons.home_outlined, Icons.home_rounded),
@@ -183,7 +183,9 @@ class _OriginShellState extends State<OriginShell> {
       ),
       LibraryScreen(onRegisterTap: () => _select(2)),
       RegisterScreen(onFingerprintReady: widget.onFingerprintReady),
-      const VerifyScreen(),
+      VerifyScreen(
+        recordId: kIsWeb ? Uri.base.queryParameters['record'] : null,
+      ),
       ProfileScreen(
         themeMode: widget.themeMode,
         onThemeModeChanged: widget.onThemeModeChanged,

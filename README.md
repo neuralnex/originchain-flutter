@@ -23,7 +23,7 @@ flutter build web --release
 
 Local fingerprints and preferences use SQLite on Android and iOS. Web uses SQLite compiled to WebAssembly in a browser worker via `sqflite_common_ffi_web`. That web companion is currently documented as experimental. If its version changes, rerun `dart run sqflite_common_ffi_web:setup` to refresh `web/sqlite3.wasm` and `web/sqflite_sw.js`.
 
-Firebase is configured for Android, iOS, and web through `lib/firebase_options.dart` and initialized when the app starts. To regenerate the configuration after changing Firebase apps or platforms, run `flutterfire configure` from the project root. Firebase Auth, Firestore, Storage, Messaging, and App Check still need their feature-specific setup before use.
+Firebase is configured for Android, iOS, and web through `lib/firebase_options.dart` and initialized when the app starts. To regenerate the configuration after changing Firebase apps or platforms, run `flutterfire configure` from the project root.
 
 ## Firebase Hosting
 
@@ -37,14 +37,39 @@ firebase deploy --only hosting
 
 The web app URL will be printed after deployment. Firebase Hosting site setup and deployment still require your Google account to have Hosting access on this Firebase project.
 
+## File sharing with Firestore and Neon
+
+Enable **Anonymous** in Firebase Authentication, create the Firestore database, and deploy the included rules with `firebase deploy --only firestore:rules`. Publishing creates a public Firestore record containing the signed SHA-256 manifest. The Register screen explicitly uploads the selected original to a private Neon bucket; the recipient's share page can issue a short-lived download link and locally verify the downloaded copy against the manifest.
+
+The first share creates a device signing key in platform secure storage. This is a self-issued device identity; it does not prove a legal name, ownership, or wallet identity. Key recovery and linking the signing identity to a wallet/account are future work. On web, secure storage uses the package's experimental WebCrypto implementation and is tied to the hosting origin.
+
+The FastAPI bridge in `backend/` issues short-lived S3-compatible upload/download URLs. The app sends bytes directly to Neon, then the API streams the stored object through SHA-256 and checks its size against the signed manifest before attaching the object key to Firestore. Neon credentials stay on the server. A shared download link is available to anyone holding the share record URL while its signed download URL remains valid.
+
+### Configure Neon and the API
+
+Create a private Neon Object Storage bucket and obtain its S3 endpoint, region, access key, and secret. Neon documents the S3-compatible endpoint and credentials in its [Object Storage setup guide](https://neon.com/docs/storage/get-started). Keep credentials in a local untracked env file for development or a secret manager in Cloud Run. Never place them in Flutter build defines, Firebase config, or the repository.
+
+```sh
+cp backend/.env.example backend/.env
+# Fill in the Neon endpoint, region, credentials, and bucket in backend/.env.
+cd backend
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+set -a && source .env && set +a
+uvicorn app.main:app --reload --port 8080
+```
+
+Set `ORIGINCHAIN_API_URL` to the API origin when running Flutter, for example `flutter run -d chrome --dart-define=ORIGINCHAIN_API_URL=http://localhost:8080`. For web, include the Hosting origin in `CORS_ORIGINS`. Deploy the `backend/` Dockerfile to Cloud Run with unauthenticated HTTP enabled (the API verifies Firebase ID tokens itself), a runtime service account with Firestore access, and the Neon values supplied as Secret Manager environment variables. The API currently limits uploads to 100 MiB by default; tune `MAX_FILE_BYTES` to your needs.
+
 ## Current foundation
 
 - Three Flutter targets: Android, iOS, and web, with five shared navigation areas: Home, Library, Register, Verify, and Profile.
 - First-run guest onboarding and light, dark, and system appearance modes. The appearance preference and onboarding choice are saved in SQLite.
-- Registration currently computes a SHA-256 fingerprint on device and stores its summary in SQLite. This is a local fingerprint only; it does not publish a manifest or submit a Solana transaction.
+- Registration computes a SHA-256 fingerprint on device. Users can explicitly upload the selected file to a private Neon bucket, publish a signed manifest to Firestore, and share a link. Recipients receive a short-lived Neon download URL and can compare the file locally.
 - Solana RPC is configured for devnet. Android can connect through the community Flutter Mobile Wallet Adapter package; the wallet remains user-custodied and the app never imports private keys.
 - iOS and web wallet connections still need their own adapter. The Flutter MWA package currently documents Android support only.
-- Sponsored transactions, the OriginChain registry program, signed provenance manifests, file sharing, sign-in, public verification, and Firebase synchronization are not implemented yet. The Solana fee payer must be a platform-controlled backend signer; no payer key belongs in this client.
+- Solana registry commits, platform-sponsored fees, persistent account sign-in, key recovery, and verified publisher identities are not implemented yet. The Solana fee payer must be a platform-controlled backend signer; no payer key belongs in this client.
 
 ## Planned app areas
 

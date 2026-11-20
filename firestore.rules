@@ -1,0 +1,27 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /sharedRecords/{recordId} {
+      allow get: if true;
+      allow list: if false;
+      allow create: if request.auth != null
+        && request.resource.data.keys().hasOnly([
+          'schema', 'ownerUid', 'createdAt', 'manifest', 'fileStorage'
+        ])
+        && request.resource.data.schema == 'originchain.share.v1'
+        && request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.createdAt is timestamp
+        && request.resource.data.manifest is map
+        && request.resource.data.manifest.schema == 'originchain.manifest.v1'
+        && request.resource.data.manifest.file is map
+        && request.resource.data.manifest.file.hashAlgorithm == 'sha256'
+        && request.resource.data.manifest.file.hash.matches('^[0-9a-f]{64}$')
+        && request.resource.data.manifest.publisher is map
+        && request.resource.data.manifest.signature is map
+        && request.resource.data.fileStorage == null;
+      allow update: if false;
+      allow delete: if request.auth != null
+        && resource.data.ownerUid == request.auth.uid;
+    }
+  }
+}

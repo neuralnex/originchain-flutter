@@ -146,7 +146,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               const _SettingRow(
                 icon: Icons.verified_user_outlined,
                 title: 'Publisher identity',
-                detail: 'Set up after authentication is connected.',
+                detail: 'A device signing key is created when you first share.',
               ),
               const SizedBox(height: 10),
               Card(

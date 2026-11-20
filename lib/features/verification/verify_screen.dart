@@ -1,7 +1,143 @@
+import 'package:crypto/crypto.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
-class VerifyScreen extends StatelessWidget {
-  const VerifyScreen({super.key});
+import '../../services/sharing/firestore_share_service.dart';
+import '../../services/sharing/origin_manifest.dart';
+import '../../services/sharing/publisher_identity_service.dart';
+import '../../services/sharing/neon_share_service.dart';
+
+class VerifyScreen extends StatefulWidget {
+  const VerifyScreen({this.recordId, super.key});
+
+  final String? recordId;
+
+  @override
+  State<VerifyScreen> createState() => _VerifyScreenState();
+}
+
+class _VerifyScreenState extends State<VerifyScreen> {
+  final _recordController = TextEditingController();
+  OriginManifest? _manifest;
+  String? _recordError;
+  String? _fileResult;
+  bool _loadingRecord = false;
+  bool _checkingFile = false;
+  bool _openingDownload = false;
+  bool _hasSharedFile = false;
+  String? _loadedRecordId;
+
+  @override
+  void initState() {
+    super.initState();
+    final recordId = widget.recordId;
+    if (recordId != null) {
+      _recordController.text = recordId;
+      _loadRecord(recordId);
+    }
+  }
+
+  @override
+  void dispose() {
+    _recordController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadRecord([String? value]) async {
+    final supplied = (value ?? _recordController.text).trim();
+    final parsedUri = Uri.tryParse(supplied);
+    final recordId = parsedUri?.queryParameters['record'] ?? supplied;
+    if (recordId.isEmpty) return;
+    setState(() {
+      _loadingRecord = true;
+      _recordError = null;
+      _fileResult = null;
+      _manifest = null;
+    });
+    try {
+      final manifest = await FirestoreShareService.instance.readPublicRecord(
+        recordId,
+      );
+      final signatureValid = await PublisherIdentityService.instance.verify(
+        manifest,
+      );
+      if (!signatureValid) throw StateError('The record signature is invalid.');
+      final fileObject = await FirestoreShareService.instance.readFileObject(
+        recordId,
+      );
+      if (mounted) {
+        setState(() {
+          _manifest = manifest;
+          _hasSharedFile = fileObject != null;
+          _loadedRecordId = recordId;
+        });
+      }
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _recordError = error is StateError
+              ? error.message
+              : error is FormatException
+              ? error.message
+              : 'Could not load that share record. Check the link and try again.';
+        });
+      }
+    } finally {
+      if (mounted) setState(() => _loadingRecord = false);
+    }
+  }
+
+  Future<void> _downloadSharedFile() async {
+    final recordId = _loadedRecordId;
+    if (recordId == null) return;
+    setState(() => _openingDownload = true);
+    try {
+      final link = await NeonShareService.instance.createDownloadLink(recordId);
+      final opened = await launchUrl(
+        link,
+        mode: LaunchMode.externalApplication,
+      );
+      if (!opened) throw StateError('Could not open the file download.');
+    } catch (error) {
+      if (mounted) {
+        setState(() {
+          _fileResult = error is StateError
+              ? error.message
+              : 'Could not create the file download. Try again later.';
+        });
+      }
+    } finally {
+      if (mounted) setState(() => _openingDownload = false);
+    }
+  }
+
+  Future<void> _compareFile() async {
+    final manifest = _manifest;
+    if (manifest == null) return;
+    setState(() {
+      _checkingFile = true;
+      _fileResult = null;
+    });
+    try {
+      final files = await FilePicker.pickFiles();
+      if (files.isEmpty) return;
+      final selected = files.first;
+      final digest = await sha256.bind(selected.readAsByteStream()).first;
+      if (!mounted) return;
+      setState(() {
+        _fileResult = digest.toString() == manifest.sha256
+            ? 'Match: this file has the fingerprint in the signed record.'
+            : 'No match: this file differs from the fingerprint in the record.';
+      });
+    } catch (_) {
+      if (mounted) {
+        setState(() => _fileResult = 'Could not read that file. Try another.');
+      }
+    } finally {
+      if (mounted) setState(() => _checkingFile = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -15,9 +151,116 @@ class VerifyScreen extends StatelessWidget {
               Text('Verify', style: theme.textTheme.headlineMedium),
               const SizedBox(height: 8),
               Text(
-                'Check a shared record or compare a file with its provenance.',
+                'Check a shared fingerprint record, then compare it with a file.',
                 style: theme.textTheme.bodyLarge?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: 24),
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      TextField(
+                        controller: _recordController,
+                        decoration: const InputDecoration(
+                          labelText: 'Share record ID',
+                          hintText: 'Paste an OriginChain share link or ID',
+                          border: OutlineInputBorder(),
+                        ),
+                        onSubmitted: (_) => _loadRecord(),
+                      ),
+                      const SizedBox(height: 12),
+                      FilledButton(
+                        onPressed: _loadingRecord ? null : () => _loadRecord(),
+                        child: Text(
+                          _loadingRecord ? 'Loading record…' : 'Load record',
+                        ),
+                      ),
+                      if (_recordError != null) ...[
+                        const SizedBox(height: 10),
+                        Text(
+                          _recordError!,
+                          style: TextStyle(color: theme.colorScheme.error),
+                        ),
+                      ],
+                      if (_manifest case final manifest?) ...[
+                        const Divider(height: 24),
+                        Text(
+                          manifest.fileName,
+                          style: theme.textTheme.titleMedium,
+                        ),
+                        const SizedBox(height: 5),
+                        Text('Signed device identity · signature valid'),
+                        const SizedBox(height: 5),
+                        SelectableText(
+                          'SHA-256  ${manifest.sha256}',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            fontFamily: 'monospace',
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        if (_hasSharedFile) ...[
+                          SizedBox(
+                            width: double.infinity,
+                            child: FilledButton.icon(
+                              onPressed: _openingDownload
+                                  ? null
+                                  : _downloadSharedFile,
+                              icon: _openingDownload
+                                  ? const SizedBox.square(
+                                      dimension: 18,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                      ),
+                                    )
+                                  : const Icon(Icons.download_rounded),
+                              label: Text(
+                                _openingDownload
+                                    ? 'Preparing download…'
+                                    : 'Download shared file',
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                        ],
+                        OutlinedButton.icon(
+                          onPressed: _checkingFile ? null : _compareFile,
+                          icon: _checkingFile
+                              ? const SizedBox.square(
+                                  dimension: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Icon(Icons.file_open_outlined),
+                          label: Text(
+                            _checkingFile ? 'Checking file…' : 'Compare a file',
+                          ),
+                        ),
+                        if (_fileResult != null) ...[
+                          const SizedBox(height: 8),
+                          Text(
+                            _fileResult!,
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              color: _fileResult!.startsWith('Match:')
+                                  ? theme.colorScheme.primary
+                                  : theme.colorScheme.error,
+                            ),
+                          ),
+                        ],
+                        const SizedBox(height: 8),
+                        Text(
+                          'This is a signed share record. It has not been committed to Solana, and the signing key is not yet linked to a verified person or wallet.',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
                 ),
               ),
               const SizedBox(height: 24),
@@ -101,7 +344,7 @@ class VerifyScreen extends StatelessWidget {
                     const SizedBox(width: 11),
                     Expanded(
                       child: Text(
-                        'Public verification is account-free. The verification service will connect in a later phase.',
+                        'The share record is publicly readable. Matching the fingerprint proves the bytes match that record; it does not prove legal ownership or authorship.',
                         style: theme.textTheme.bodyMedium?.copyWith(
                           color: theme.colorScheme.onSurfaceVariant,
                         ),
