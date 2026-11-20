@@ -24,7 +24,6 @@ OriginChain is a cross-platform digital provenance app. It fingerprints files on
   <img alt="Amazon S3 API" src="https://img.shields.io/badge/S3--compatible_API-569A31?style=for-the-badge&logo=amazons3&logoColor=white">
   <img alt="SQLite" src="https://img.shields.io/badge/SQLite-003B57?style=for-the-badge&logo=sqlite&logoColor=white">
   <img alt="Dio HTTP client" src="https://img.shields.io/badge/Dio_HTTP_Client-0175C2?style=for-the-badge&logo=dart&logoColor=white">
-  <img alt="Render" src="https://img.shields.io/badge/Render-000000?style=for-the-badge&logo=render&logoColor=white">
   <img alt="Firebase Hosting" src="https://img.shields.io/badge/Firebase_Hosting-FFCA28?style=for-the-badge&logo=firebase&logoColor=black">
   <img alt="Docker" src="https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white">
 </p>
@@ -59,7 +58,7 @@ Flutter app (Android, iOS, web)
   ├── Firestore: signed manifests and app projections
   ├── SQLite: local fingerprints and preferences
   ├── Solana: publisher signatures and provenance commitments
-  └── FastAPI (Render)
+  └── FastAPI backend
        ├── Firebase token validation
        ├── sponsored Solana transaction preparation and submission
        └── short-lived S3-compatible upload/download URLs
@@ -70,7 +69,7 @@ Firebase account IDs are not publisher signing keys. Firestore indexes are appli
 
 ## OriginChain API
 
-The hosted API is available at [originchain-flutter.onrender.com](https://originchain-flutter.onrender.com). Explore the interactive [OpenAPI documentation](https://originchain-flutter.onrender.com/docs), [ReDoc reference](https://originchain-flutter.onrender.com/redoc), or [service health](https://originchain-flutter.onrender.com/health).
+The hosted API provides interactive OpenAPI documentation at `/docs`, a ReDoc reference at `/redoc`, and a service health endpoint at `/health` on its configured API domain.
 
 API operations are grouped into records, folders, received work, Solana registry transactions, and file sharing. Protected operations use a Firebase ID token as a bearer token. Public verification endpoints do not require an OriginChain account.
 
@@ -83,7 +82,7 @@ API operations are grouped into records, folders, received work, Solana registry
 | App data | Cloud Firestore, SQLite (`sqflite`) |
 | File sharing | FastAPI, Neon Object Storage, S3-compatible API, Dio |
 | Provenance | SHA-256, Ed25519, Solana, Anchor |
-| Hosting | Firebase Hosting, Render, Docker |
+| Hosting | Firebase Hosting, container deployment, Docker |
 | Other Flutter packages | `crypto`, `cryptography`, `file_picker`, `flutter_secure_storage`, `share_plus`, `url_launcher` |
 
 ## Requirements
@@ -93,7 +92,7 @@ API operations are grouped into records, folders, received work, Solana registry
 - Firebase CLI and FlutterFire CLI for Firebase configuration/deployment
 - Python 3.12+ for the API
 - Anchor and Solana CLI for program development/deployment
-- A Render service and Neon Object Storage bucket for hosted API/file sharing
+- A container hosting service and Neon Object Storage bucket for hosted API/file sharing
 
 ## Run the app
 
@@ -104,7 +103,7 @@ flutter run -d <android-device-id>
 flutter run -d <ios-device-id>
 ```
 
-The API defaults to `https://originchain-flutter.onrender.com`. To use a local API:
+The deployed API origin is configured with `ORIGINCHAIN_API_URL`. To use a local API:
 
 ```bash
 flutter run -d chrome \
@@ -150,7 +149,7 @@ flutter build web --release
 firebase deploy --only hosting
 ```
 
-Deploy the API from the `backend/` directory using the repository Dockerfile. Configure Neon credentials, Firebase Admin credentials, `SOLANA_FEE_PAYER_SECRET_KEY`, the devnet RPC URL, and the deployed Firebase Hosting origin in Render's environment. The sponsor secret must remain server-side and funded with devnet SOL.
+Deploy the API from the `backend/` directory using the repository Dockerfile. Configure Neon credentials, Firebase Admin credentials, `SOLANA_FEE_PAYER_SECRET_KEY`, the devnet RPC URL, and the deployed Firebase Hosting origin in the hosting environment. The sponsor secret must remain server-side and funded with devnet SOL.
 
 The Anchor program is deployed to devnet at `EbePt3vR4pp9WRuY6hAfhchTfAPs1nNVsJYyurXajUPB`. Its upgrade authority is a separate Solana deployment key; the platform fee-payer key is not the upgrade authority.
 
