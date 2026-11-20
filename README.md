@@ -25,12 +25,26 @@ Local fingerprints and preferences use SQLite on Android and iOS. Web uses SQLit
 
 Firebase is configured for Android, iOS, and web through `lib/firebase_options.dart` and initialized when the app starts. To regenerate the configuration after changing Firebase apps or platforms, run `flutterfire configure` from the project root. Firebase Auth, Firestore, Storage, Messaging, and App Check still need their feature-specific setup before use.
 
+## Firebase Hosting
+
+Hosting serves the Flutter web release from `build/web`, uses an SPA rewrite for Flutter routes, and builds the web bundle before deployment. The Firebase CLI project alias is set to the configured project.
+
+```sh
+firebase login
+flutter build web --release --no-tree-shake-icons --no-wasm-dry-run
+firebase deploy --only hosting
+```
+
+The web app URL will be printed after deployment. Firebase Hosting site setup and deployment still require your Google account to have Hosting access on this Firebase project.
+
 ## Current foundation
 
 - Three Flutter targets: Android, iOS, and web, with five shared navigation areas: Home, Library, Register, Verify, and Profile.
 - First-run guest onboarding and light, dark, and system appearance modes. The appearance preference and onboarding choice are saved in SQLite.
 - Registration currently computes a SHA-256 fingerprint on device and stores its summary in SQLite. This is a local fingerprint only; it does not publish a manifest or submit a Solana transaction.
-- Sign-in, public verification, Firebase synchronization, and wallet connection still need their service configuration and implementation.
+- Solana RPC is configured for devnet. Android can connect through the community Flutter Mobile Wallet Adapter package; the wallet remains user-custodied and the app never imports private keys.
+- iOS and web wallet connections still need their own adapter. The Flutter MWA package currently documents Android support only.
+- Sponsored transactions, the OriginChain registry program, signed provenance manifests, file sharing, sign-in, public verification, and Firebase synchronization are not implemented yet. The Solana fee payer must be a platform-controlled backend signer; no payer key belongs in this client.
 
 ## Planned app areas
 

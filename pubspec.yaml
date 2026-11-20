@@ -46,6 +46,8 @@ dependencies:
   firebase_messaging: ^17.1.0
   firebase_app_check: ^0.5.2
   firebase_crashlytics: ^6.1.0
+  solana: 0.31.2+1
+  solana_mobile_client: 0.1.2
 
 dev_dependencies:
   flutter_test:

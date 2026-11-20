@@ -27,6 +27,8 @@ doc/api/
 .flutter-plugins
 .flutter-plugins-dependencies
 .brand-preview/
+/.firebase/
+/firebase-debug.log
 
 # IDE metadata
 .idea/
