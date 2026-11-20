@@ -1,58 +1,136 @@
 # OriginChain
 
-OriginChain is a Flutter app for registering and verifying the provenance of digital assets. Android, iOS, and web are targets of this shared Flutter client.
+**Know where it came from. Know what changed. Verify what you receive.**
 
-## Product boundaries
+OriginChain is a cross-platform digital provenance app. It fingerprints files on the user's device, records signed provenance commitments on Solana, and lets recipients inspect a file's registered history. Original files stay local unless the user explicitly uploads a shareable copy.
 
-- Hash files on the device. Upload originals only when the user explicitly chooses to store or share them.
-- Use Firebase for app identity, synchronization, and notifications. Firebase records are searchable projections, not canonical provenance evidence.
-- Use Solana for provenance commitments. A Firebase UID is not a publisher signing identity.
-- The OriginChain platform covers all Solana transaction and network fees. Users must not be asked to pay them.
-- Keep wallet connection optional and platform-aware. Android wallet handoff and iOS wallet connection need separate paths.
+<p align="left">
+  <img alt="Flutter" src="https://img.shields.io/badge/Flutter-02569B?style=for-the-badge&logo=flutter&logoColor=white">
+  <img alt="Dart" src="https://img.shields.io/badge/Dart-0175C2?style=for-the-badge&logo=dart&logoColor=white">
+  <img alt="Firebase Authentication" src="https://img.shields.io/badge/Firebase_Auth-FFCA28?style=for-the-badge&logo=firebase&logoColor=black">
+  <img alt="Google Sign-In" src="https://img.shields.io/badge/Google_Sign--In-4285F4?style=for-the-badge&logo=google&logoColor=white">
+  <img alt="Cloud Firestore" src="https://img.shields.io/badge/Firestore-FFCA28?style=for-the-badge&logo=firebase&logoColor=black">
+  <img alt="Firebase Storage" src="https://img.shields.io/badge/Firebase_Storage-FFCA28?style=for-the-badge&logo=firebase&logoColor=black">
+  <img alt="Firebase Cloud Messaging" src="https://img.shields.io/badge/Cloud_Messaging-FFCA28?style=for-the-badge&logo=firebase&logoColor=black">
+  <img alt="Firebase App Check" src="https://img.shields.io/badge/App_Check-FFCA28?style=for-the-badge&logo=firebase&logoColor=black">
+  <img alt="Firebase Crashlytics" src="https://img.shields.io/badge/Crashlytics-FFCA28?style=for-the-badge&logo=firebase&logoColor=black">
+  <img alt="Solana" src="https://img.shields.io/badge/Solana-9945FF?style=for-the-badge&logo=solana&logoColor=white">
+  <img alt="Anchor" src="https://img.shields.io/badge/Anchor-333333?style=for-the-badge&logo=anchor&logoColor=white">
+  <img alt="Solana Mobile Wallet Adapter" src="https://img.shields.io/badge/Solana_Mobile_MWA-9945FF?style=for-the-badge&logo=solana&logoColor=white">
+  <img alt="SHA-256 and Ed25519" src="https://img.shields.io/badge/SHA--256%20%7C%20Ed25519-Cryptography-6E7781?style=for-the-badge">
+  <img alt="Python" src="https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white">
+  <img alt="FastAPI" src="https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white">
+  <img alt="Neon Object Storage" src="https://img.shields.io/badge/Neon_Object_Storage-00E599?style=for-the-badge&logo=neon&logoColor=black">
+  <img alt="Amazon S3 API" src="https://img.shields.io/badge/S3--compatible_API-569A31?style=for-the-badge&logo=amazons3&logoColor=white">
+  <img alt="SQLite" src="https://img.shields.io/badge/SQLite-003B57?style=for-the-badge&logo=sqlite&logoColor=white">
+  <img alt="Dio HTTP client" src="https://img.shields.io/badge/Dio_HTTP_Client-0175C2?style=for-the-badge&logo=dart&logoColor=white">
+  <img alt="Render" src="https://img.shields.io/badge/Render-000000?style=for-the-badge&logo=render&logoColor=white">
+  <img alt="Firebase Hosting" src="https://img.shields.io/badge/Firebase_Hosting-FFCA28?style=for-the-badge&logo=firebase&logoColor=black">
+  <img alt="Docker" src="https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white">
+</p>
 
-## Mobile development
+## Product principles
 
-Open this repository in VS Code and use the Flutter and Dart extensions.
+- **Fingerprint locally.** SHA-256 is computed on the selected file; registration does not upload its bytes.
+- **Ask before sharing.** Uploading a copy to private Neon Object Storage is a separate, explicit action.
+- **Keep evidence portable.** A signed manifest and Solana commitment can be checked independently of the app account.
+- **Describe results carefully.** A match means the bytes match a registered version. No match does not establish that a file is false.
+- **Let the platform sponsor fees.** The backend pays Solana transaction fees; users sign their own provenance.
 
-```sh
+## Core capabilities
+
+| Area | Current implementation |
+| --- | --- |
+| Home | Folders, owned work, and received work views |
+| Library | File-type filters, folder management, asset grouping, and version history |
+| Register | On-device fingerprinting, signed manifests, duplicate detection, optional file upload, and sponsored devnet registration |
+| Verify | Public record lookup, publisher signature checks, Solana receipt checks, local file comparison, and version story |
+| Accounts | Guest sessions, email/password, password reset, and Google sign-in through Firebase Auth |
+| Wallet | Optional Android Mobile Wallet Adapter connection; secure device identity fallback on iOS and web |
+| API | FastAPI services for file sharing, account-scoped records/folders, received work, and sponsored Solana transactions |
+
+The registry currently uses Solana devnet.
+
+## Architecture
+
+```text
+Flutter app (Android, iOS, web)
+  ├── Firebase Auth: guest, email/password, Google
+  ├── Firestore: signed manifests and app projections
+  ├── SQLite: local fingerprints and preferences
+  ├── Solana: publisher signatures and provenance commitments
+  └── FastAPI (Render)
+       ├── Firebase token validation
+       ├── sponsored Solana transaction preparation and submission
+       └── short-lived S3-compatible upload/download URLs
+            └── Neon Object Storage: optional shared file copies
+```
+
+Firebase account IDs are not publisher signing keys. Firestore indexes are application views; the signed manifest and verified Solana transaction provide provenance evidence. The chain does not prove that content is truthful or establish legal ownership.
+
+## OriginChain API
+
+The hosted API is available at [originchain-flutter.onrender.com](https://originchain-flutter.onrender.com). Explore the interactive [OpenAPI documentation](https://originchain-flutter.onrender.com/docs), [ReDoc reference](https://originchain-flutter.onrender.com/redoc), or [service health](https://originchain-flutter.onrender.com/health).
+
+API operations are grouped into records, folders, received work, Solana registry transactions, and file sharing. Protected operations use a Firebase ID token as a bearer token. Public verification endpoints do not require an OriginChain account.
+
+## Technology
+
+| Layer | Technologies |
+| --- | --- |
+| App | Flutter, Dart, Material 3 |
+| Authentication | Firebase Auth, Google Sign-In, anonymous guest accounts |
+| App data | Cloud Firestore, SQLite (`sqflite`) |
+| File sharing | FastAPI, Neon Object Storage, S3-compatible API, Dio |
+| Provenance | SHA-256, Ed25519, Solana, Anchor |
+| Hosting | Firebase Hosting, Render, Docker |
+| Other Flutter packages | `crypto`, `cryptography`, `file_picker`, `flutter_secure_storage`, `share_plus`, `url_launcher` |
+
+## Requirements
+
+- Flutter SDK and Dart SDK compatible with `pubspec.yaml`
+- Firebase project configured for Android, iOS, and web
+- Firebase CLI and FlutterFire CLI for Firebase configuration/deployment
+- Python 3.12+ for the API
+- Anchor and Solana CLI for program development/deployment
+- A Render service and Neon Object Storage bucket for hosted API/file sharing
+
+## Run the app
+
+```bash
 flutter pub get
-flutter run -d chrome       # Web; the Render API URL is the default
-flutter run                 # Android or iOS device
-flutter build web --release
+flutter run -d chrome
+flutter run -d <android-device-id>
+flutter run -d <ios-device-id>
 ```
 
-Local fingerprints and preferences use SQLite on Android and iOS. Web uses SQLite compiled to WebAssembly in a browser worker via `sqflite_common_ffi_web`. That web companion is currently documented as experimental. If its version changes, rerun `dart run sqflite_common_ffi_web:setup` to refresh `web/sqlite3.wasm` and `web/sqflite_sw.js`.
+The API defaults to `https://originchain-flutter.onrender.com`. To use a local API:
 
-Firebase is configured for Android, iOS, and web through `lib/firebase_options.dart` and initialized when the app starts. To regenerate the configuration after changing Firebase apps or platforms, run `flutterfire configure` from the project root.
-
-## Firebase Hosting
-
-Hosting serves the Flutter web release from `build/web`, uses an SPA rewrite for Flutter routes, and builds the web bundle before deployment. The Firebase CLI project alias is set to the configured project.
-
-```sh
-firebase login
-firebase deploy --only hosting
+```bash
+flutter run -d chrome \
+  --dart-define=ORIGINCHAIN_API_URL=http://localhost:8080
 ```
 
-The web app URL will be printed after deployment. Firebase Hosting site setup and deployment still require your Google account to have Hosting access on this Firebase project.
+## Firebase and Google sign-in setup
 
-## File sharing with Firestore and Neon
+1. In Firebase Console, open **Authentication → Sign-in method** and enable **Anonymous**, **Email/Password**, and **Google** providers.
+2. Add the Android SHA-1 signing fingerprints to the Firebase Android app. For local debug builds, retrieve the fingerprint with `cd android && ./gradlew signingReport`.
+3. Refresh the Android `google-services.json` after enabling Google sign-in and adding the Android signing fingerprints.
+4. Add the iOS Firebase app with bundle ID `tech.originchain.originchain`; download `GoogleService-Info.plist`, add it to `ios/Runner`, and configure the Google reversed client ID URL scheme as described in the [Google Sign-In iOS setup](https://pub.dev/packages/google_sign_in).
+5. For web, add the deployed Hosting domain and any local development domains to Firebase Authentication's authorized domains.
+6. Refresh the FlutterFire configuration after changing registered Firebase apps or platforms:
 
-Enable **Anonymous** in Firebase Authentication, create the Firestore database, and deploy the included rules with `firebase deploy --only firestore:rules`. Publishing creates a public Firestore record containing the signed SHA-256 manifest. The Register screen explicitly uploads the selected original to a private Neon bucket; the recipient's share page can issue a short-lived download link and locally verify the downloaded copy against the manifest.
+```bash
+flutterfire configure
+```
 
-The first share creates a device signing key in platform secure storage. This is a self-issued device identity; it does not prove a legal name, ownership, or wallet identity. Key recovery and linking the signing identity to a wallet/account are future work. On web, secure storage uses the package's experimental WebCrypto implementation and is tied to the hosting origin.
+Google sign-in on a guest account links the Google credential to that Firebase UID. Signing into an existing account from a guest session does not merge separate Firebase user data.
 
-The FastAPI bridge in `backend/` issues short-lived S3-compatible upload/download URLs. The app sends bytes directly to Neon, then the API streams the stored object through SHA-256 and checks its size against the signed manifest before attaching the object key to Firestore. Neon credentials stay on the server. A shared download link is available to anyone holding the share record URL while its signed download URL remains valid.
+## Run the API locally
 
-The Library calls the authenticated `GET /v1/records` endpoint, which returns only the current Firebase user's records. Records sharing an `assetId` are grouped into version history. Registering a changed file from an asset creates a signed manifest that names the prior `versionId` and submits the Anchor `append_version` instruction; a matching file is rejected locally without consuming a sponsored transaction.
-
-### Configure Neon and the API
-
-Create a private Neon Object Storage bucket and obtain its S3 endpoint, region, access key, and secret. Neon documents the S3-compatible endpoint and credentials in its [Object Storage setup guide](https://neon.com/docs/storage/get-started). Keep credentials in a local untracked env file for development or Render environment secrets. Never place them in Flutter build defines, Firebase config, or the repository.
-
-```sh
+```bash
 cp backend/.env.example backend/.env
-# Fill in the Neon endpoint, region, credentials, and bucket in backend/.env.
+# Fill in Neon, Firebase Admin, and Solana sponsor settings in backend/.env.
 cd backend
 python -m venv .venv
 source .venv/bin/activate
@@ -61,43 +139,35 @@ set -a && source .env && set +a
 uvicorn app.main:app --reload --port 8080
 ```
 
-Set `ORIGINCHAIN_API_URL` to the API origin when running Flutter against a local API, for example `flutter run -d chrome --dart-define=ORIGINCHAIN_API_URL=http://localhost:8080`. For web, include the Hosting origin in `CORS_ORIGINS`. The API currently limits uploads to 100 MiB by default; tune `MAX_FILE_BYTES` to your needs.
+Keep `.env`, Firebase service-account JSON, and Solana sponsor secrets out of Git. The API independently validates Firebase ID tokens and owns the fee-payer key. Its limits and environment variables are documented in [`backend/.env.example`](backend/.env.example).
 
-### Deploy the API on Render
+## Deploy
 
-The Render web service uses `backend/` and the included Dockerfile, with health check path `/health`. Configure `AWS_ENDPOINT_URL_S3`, `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `NEON_BUCKET`, `CORS_ORIGINS`, `MAX_FILE_BYTES`, and `SIGNED_URL_TTL_SECONDS`. Set `CORS_ORIGINS` to the Firebase Hosting origin. Firebase Admin also needs credentials on Render; add a Firebase service-account JSON as a Render secret file and set `GOOGLE_APPLICATION_CREDENTIALS` to its mounted path. Never place that JSON or Neon credentials in the repo.
+Build and deploy the Flutter web client to Firebase Hosting:
 
-For platform-sponsored registration, add `SOLANA_FEE_PAYER_SECRET_KEY` as a Render secret, plus `SOLANA_RPC_URL=https://api.devnet.solana.com`, `ORIGINCHAIN_PROGRAM_ID=EbePt3vR4pp9WRuY6hAfhchTfAPs1nNVsJYyurXajUPB`, `SOLANA_USER_DAILY_LIMIT=10`, and `SOLANA_GLOBAL_DAILY_LIMIT=100`. The sponsor key must be funded with devnet SOL and held only by the platform backend. The API caps registrations at 10 per Firebase UID per UTC day and 100 total per UTC day. `/health` reports whether the sponsor secret is configured.
-
-The Anchor registry is deployed on Solana devnet at `EbePt3vR4pp9WRuY6hAfhchTfAPs1nNVsJYyurXajUPB`. Version 1 anchors SHA-256 digests of the file and the minified UTF-8 JSON from `jsonEncode(manifest.toJson())`; the signed manifest itself stays in Firestore. To rebuild it, ensure Anchor, Solana CLI, Rust and the SBF toolchain are installed, then run:
-
-```sh
-anchor build
-anchor program deploy --provider.cluster devnet --provider.wallet ~/.config/solana/originchain-devnet.json
+```bash
+flutter build web --release
+firebase deploy --only hosting
 ```
 
-This deployment wallet is the program upgrade authority. Never use a user's wallet as the app sponsor.
+Deploy the API from the `backend/` directory using the repository Dockerfile. Configure Neon credentials, Firebase Admin credentials, `SOLANA_FEE_PAYER_SECRET_KEY`, the devnet RPC URL, and the deployed Firebase Hosting origin in Render's environment. The sponsor secret must remain server-side and funded with devnet SOL.
 
-## Current foundation
+The Anchor program is deployed to devnet at `EbePt3vR4pp9WRuY6hAfhchTfAPs1nNVsJYyurXajUPB`. Its upgrade authority is a separate Solana deployment key; the platform fee-payer key is not the upgrade authority.
 
-- Three Flutter targets: Android, iOS, and web, with five shared navigation areas: Home, Library, Register, Verify, and Profile.
-- First-run guest onboarding and light, dark, and system appearance modes. The appearance preference and onboarding choice are saved in SQLite.
-- Registration computes a SHA-256 fingerprint on device. Users can explicitly upload the selected file to a private Neon bucket, publish a signed manifest to Firestore, and share a link. Recipients receive a short-lived Neon download URL and can compare the file locally.
-- The Anchor registry is deployed on devnet. Registration uses a device-held Ed25519 publisher identity and a Render-held fee payer; the client cannot select arbitrary programs or transfers for sponsorship.
-- Public verification checks the manifest signature and asks the backend to validate the matching confirmed Solana transaction. File bytes remain separate in Neon and are downloaded only through an expiring link.
-- Android wallet connection through Mobile Wallet Adapter remains optional; registration works on web, iOS, and Android with the device publisher identity. Key recovery and verified real-world identities remain future work.
+## Repository layout
 
-## Planned app areas
+```text
+lib/                 Flutter application and platform services
+backend/             FastAPI API and Docker deployment
+programs/             Anchor Solana program
+specs/                Protocol and manifest specifications
+infrastructure/       Firebase and deployment configuration
+```
 
-- Onboarding and authentication
-- Home and activity
-- Asset library
-- Asset registration
-- Public verification
-- Profile, identity, wallet, security, and privacy settings
+## Security notes
 
-## Planned architecture
-
-Keep UI, domain behavior, and infrastructure separate. Firebase and Solana integrations should sit behind services/repositories so protocol rules do not depend on a mobile vendor SDK. Local file hashing and an offline operation queue are part of the mobile core. A FastAPI service will validate requests and coordinate registry/indexing work; it must independently enforce authentication and authorization.
-
-Before mainnet, finalize the protocol and manifest canonicalization, add key recovery and authenticated account linking, deploy a new program ID after a security review, provision and monitor the production sponsor wallet, and load-test the API quotas.
+- Never commit `.env` files, Firebase service-account keys, wallet seed phrases, or sponsor secrets.
+- Do not place private signing keys in Firestore or Neon.
+- A wallet signature proves control of a signing key for that message; it does not prove a legal identity or copyright ownership.
+- Public verification is accountless. File downloads require a valid share record and use expiring URLs.
+- Review the community-maintained Flutter Solana packages and pin versions before making them security-critical.

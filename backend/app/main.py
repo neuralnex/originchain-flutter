@@ -8,7 +8,8 @@ from urllib.parse import quote
 import boto3
 import firebase_admin
 from botocore.config import Config
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.middleware.cors import CORSMiddleware
 from firebase_admin import auth, firestore
 from pydantic import BaseModel, Field
@@ -24,7 +25,37 @@ RECORD_ID = re.compile(r"^[A-Za-z0-9_-]{10,40}$")
 if not firebase_admin._apps:
     firebase_admin.initialize_app()
 
-app = FastAPI(title="OriginChain API", version="0.1.0")
+app = FastAPI(
+    title="OriginChain Provenance API",
+    summary="API services for signed digital provenance and file sharing.",
+    description=(
+        "OriginChain helps applications register, share, and verify digital asset "
+        "provenance. The API validates Firebase sessions, coordinates platform-"
+        "sponsored Solana transactions, indexes account-scoped work, and issues "
+        "short-lived links for user-authorized file transfers. Original files are "
+        "never placed on-chain.\n\n"
+        "### Authentication\n"
+        "Account-scoped operations use a Firebase ID token in the `Authorization: "
+        "Bearer <token>` header. Public verification and download-link lookup do "
+        "not require an app account.\n\n"
+        "### Network\n"
+        "The current registry integration targets Solana devnet. Transaction fees "
+        "are paid by the OriginChain platform sponsor; publishers sign the "
+        "provenance transaction."
+    ),
+    version="1.0.0",
+    docs_url="/docs",
+    redoc_url="/redoc",
+    openapi_tags=[
+        {"name": "Service", "description": "Service availability and API metadata."},
+        {"name": "Records", "description": "Account-scoped provenance records and public version history."},
+        {"name": "Folders", "description": "Organize records in the authenticated user's workspace."},
+        {"name": "Received", "description": "Save and list provenance records received from others."},
+        {"name": "Solana", "description": "Prepare sponsored registry transactions and verify on-chain evidence."},
+        {"name": "File sharing", "description": "User-authorized file upload and expiring download links."},
+    ],
+)
+firebase_bearer = HTTPBearer(auto_error=False, scheme_name="FirebaseBearer")
 origins = [value.strip() for value in os.environ.get("CORS_ORIGINS", "").split(",") if value.strip()]
 app.add_middleware(
     CORSMiddleware,
@@ -49,11 +80,13 @@ def s3_client():
     )
 
 
-def require_user(authorization: str | None = Header(default=None)) -> dict[str, Any]:
-    if not authorization or not authorization.startswith("Bearer "):
+def require_user(
+    credentials: HTTPAuthorizationCredentials | None = Depends(firebase_bearer),
+) -> dict[str, Any]:
+    if credentials is None:
         raise HTTPException(status_code=401, detail="Firebase sign-in is required.")
     try:
-        return auth.verify_id_token(authorization.removeprefix("Bearer "))
+        return auth.verify_id_token(credentials.credentials)
     except Exception as exc:
         raise HTTPException(status_code=401, detail="Invalid Firebase session.") from exc
 
@@ -112,24 +145,17 @@ def _sponsored_args(body: SponsoredTransactionRequest):
     }
 
 
-@app.get("/health")
+@app.get(
+    "/health",
+    tags=["Service"],
+    summary="Check API availability",
+    description="Returns a minimal status response for uptime monitors.",
+)
 def health():
-    try:
-        solana_sponsor._fee_payer()
-        sponsor_ready = True
-    except HTTPException:
-        sponsor_ready = False
-    return {
-        "status": "ok",
-        "solana": {
-            "cluster": "devnet" if "devnet" in solana_sponsor.RPC_URL else "custom",
-            "programId": str(solana_sponsor.PROGRAM_ID),
-            "sponsorshipConfigured": sponsor_ready,
-        },
-    }
+    return {"status": "ok"}
 
 
-@app.get("/v1/records")
+@app.get("/v1/records", tags=["Records"], summary="List my provenance records")
 def list_owned_records(user=Depends(require_user)):
     """Return only the caller's share records for the Library projection."""
     docs = (
@@ -154,7 +180,7 @@ def list_owned_records(user=Depends(require_user)):
     return {"records": records}
 
 
-@app.get("/v1/records/{record_id}/history")
+@app.get("/v1/records/{record_id}/history", tags=["Records"], summary="Get public asset version history")
 def public_record_history(record_id: str):
     _, record = get_record(record_id)
     manifest = record.get("manifest") or {}
@@ -178,7 +204,7 @@ def public_record_history(record_id: str):
     return {"versions": versions}
 
 
-@app.get("/v1/folders")
+@app.get("/v1/folders", tags=["Folders"], summary="List my folders")
 def list_folders(user=Depends(require_user)):
     docs = (
         firestore.client()
@@ -190,7 +216,7 @@ def list_folders(user=Depends(require_user)):
     return {"folders": folders}
 
 
-@app.post("/v1/folders")
+@app.post("/v1/folders", tags=["Folders"], summary="Create a folder")
 def create_folder(body: FolderRequest, user=Depends(require_user)):
     name = " ".join(body.name.split())
     if not name:
@@ -204,7 +230,7 @@ def create_folder(body: FolderRequest, user=Depends(require_user)):
     return {"id": reference.id, "name": name}
 
 
-@app.post("/v1/records/{record_id}/folder")
+@app.post("/v1/records/{record_id}/folder", tags=["Folders"], summary="Move a record into a folder")
 def assign_record_folder(
     record_id: str,
     body: FolderAssignmentRequest,
@@ -224,7 +250,7 @@ def assign_record_folder(
     return {"assigned": True}
 
 
-@app.post("/v1/received/{record_id}")
+@app.post("/v1/received/{record_id}", tags=["Received"], summary="Save a received record")
 def save_received_record(record_id: str, user=Depends(require_user)):
     _, record = get_record(record_id)
     if record.get("ownerUid") == user["uid"]:
@@ -237,7 +263,7 @@ def save_received_record(record_id: str, user=Depends(require_user)):
     return {"saved": True}
 
 
-@app.get("/v1/received")
+@app.get("/v1/received", tags=["Received"], summary="List received records")
 def list_received_records(user=Depends(require_user)):
     database = firestore.client()
     refs = (
@@ -262,7 +288,7 @@ def list_received_records(user=Depends(require_user)):
     return {"records": records}
 
 
-@app.post("/v1/solana/transactions")
+@app.post("/v1/solana/transactions", tags=["Solana"], summary="Prepare a sponsored registry transaction")
 def create_sponsored_transaction(body: SponsoredTransactionRequest, user=Depends(require_user)):
     solana_sponsor.reserve_sponsor_attempt(
         user["uid"],
@@ -279,7 +305,7 @@ def create_sponsored_transaction(body: SponsoredTransactionRequest, user=Depends
     }
 
 
-@app.post("/v1/solana/transactions/submit")
+@app.post("/v1/solana/transactions/submit", tags=["Solana"], summary="Submit a publisher-signed transaction")
 def submit_sponsored_transaction(body: SponsoredSubmissionRequest, user=Depends(require_user)):
     signature = solana_sponsor.submit_transaction(
         body.operation, _sponsored_args(body), body.transactionBase64
@@ -287,14 +313,14 @@ def submit_sponsored_transaction(body: SponsoredSubmissionRequest, user=Depends(
     return {"signature": signature, "cluster": "devnet"}
 
 
-@app.post("/v1/solana/verify")
+@app.post("/v1/solana/verify", tags=["Solana"], summary="Verify a registry transaction")
 def verify_public_solana_record(body: PublicSolanaVerificationRequest):
     return solana_sponsor.verify_transaction(
         body.transactionSignature, body.operation, _sponsored_args(body)
     )
 
 
-@app.post("/v1/shares/{record_id}/upload-url")
+@app.post("/v1/shares/{record_id}/upload-url", tags=["File sharing"], summary="Create a short-lived upload URL")
 def create_upload_url(record_id: str, body: UploadRequest, user=Depends(require_user)):
     reference, record = get_record(record_id)
     if record.get("ownerUid") != user["uid"]:
@@ -335,7 +361,7 @@ def create_upload_url(record_id: str, body: UploadRequest, user=Depends(require_
     }
 
 
-@app.post("/v1/shares/{record_id}/finalize")
+@app.post("/v1/shares/{record_id}/finalize", tags=["File sharing"], summary="Validate and attach an uploaded file")
 def finalize_upload(record_id: str, body: UploadRequest, objectKey: str, user=Depends(require_user)):
     reference, record = get_record(record_id)
     if record.get("ownerUid") != user["uid"]:
@@ -373,7 +399,7 @@ def finalize_upload(record_id: str, body: UploadRequest, objectKey: str, user=De
     return {"attached": True}
 
 
-@app.get("/v1/shares/{record_id}/download-url")
+@app.get("/v1/shares/{record_id}/download-url", tags=["File sharing"], summary="Create a short-lived download URL")
 def create_download_url(record_id: str):
     _, record = get_record(record_id)
     storage = record.get("fileStorage") or {}

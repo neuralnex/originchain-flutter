@@ -319,6 +319,17 @@ class _AccountDialogState extends State<_AccountDialog> {
                 ),
                 validator: (value) => value == null || value.length < 8 ? 'Use at least 8 characters.' : null,
               ),
+              const SizedBox(height: 16),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: _busy ? null : _signInWithGoogle,
+                  icon: const Icon(Icons.g_mobiledata_rounded, size: 26),
+                  label: const Text('Continue with Google'),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text('or use email and password', style: Theme.of(context).textTheme.bodySmall),
               if (_error != null) ...[
                 const SizedBox(height: 10),
                 Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
@@ -345,6 +356,23 @@ class _AccountDialogState extends State<_AccountDialog> {
         ),
       ],
     );
+  }
+
+  Future<void> _signInWithGoogle() async {
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      await OriginAuthService.instance.signInWithGoogle();
+      if (mounted) Navigator.pop(context);
+    } on FirebaseAuthException catch (error) {
+      if (mounted) setState(() => _error = _authMessage(error.code));
+    } catch (_) {
+      if (mounted) setState(() => _error = 'Google sign-in did not complete. Check Google provider setup and try again.');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 }
 
